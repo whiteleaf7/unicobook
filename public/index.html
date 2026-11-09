@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- black-translucent にすると、iOS のホーム画面アプリで画面下の固定要素とタップ位置がずれるため使わない -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#fbfaf6" />
+    <meta name="apple-mobile-web-app-title" content="ユニコブック" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+
+    <!-- iOS PWA 起動スプラッシュ画面 (iPhone 15 Pro: 393x852 pt @3x) -->
+    <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="splash/splash-1179x2556.png" />
+    <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="splash/splash-dark-1179x2556.png" />
+    <link rel="apple-touch-startup-image" href="splash/splash-1179x2556.png" />
+
+    <style>
+      :root {
+        --bg: #fbfaf6;
+        color-scheme: light;
+      }
+      :root[data-theme='dark'] {
+        --bg: #121212;
+        color-scheme: dark;
+      }
+      :root[data-theme='sepia'] {
+        --bg: #f4ecd8;
+        color-scheme: light;
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background-color: var(--bg);
+      }
+    </style>
+    <script>
+      try {
+        let theme = JSON.parse(localStorage.getItem('nb.settings'))?.theme;
+        if (theme === 'auto') theme = 'light';
+        if (theme) document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <title>ユニコブック</title>
+  </head>
+  <body>
+    <section id="filer" hidden>
+      <header class="bar">
+        <button class="icon home is-top" aria-label="ユニコブック">
+          <img class="unico-icon" src="icons/icon-192.png" alt="ユニコブック" />
+        </button>
+        <nav class="crumbs"></nav>
+        <button class="icon summary" aria-label="作品設定・あらすじ" title="作品設定・あらすじ" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5zM8 7h8M8 11h6" /></svg>
+        </button>
+        <button class="icon sort" aria-label="並び順を変更" title="並び順を変更">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M6 12h12m-9 6h6" /></svg>
+        </button>
+        <button class="icon search" aria-label="すべての作品から検索">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /></svg>
+        </button>
+        <button class="icon reload" aria-label="一覧を読み直す（長押しでページを再読み込み）" title="一覧を読み直す（長押しでページを再読み込み）">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 1 1-7-7c1.96 0 3.83.78 5.24 2.13L19 8.5" /><path d="M19 4v4.5h-4.5" /></svg>
+        </button>
+      </header>
+      <main class="list"></main>
+    </section>
+
+    <section id="reader" hidden>
+      <div class="page"><div class="content"></div></div>
+      <div class="foot">
+        <div class="status"></div>
+        <div class="changes" hidden>
+          <button class="next-change"></button>
+          <button class="diff-detail" aria-label="差分の詳細を見る">詳細</button>
+          <button class="close-changes" aria-label="変更の印を消す">×</button>
+        </div>
+      </div>
+      <div class="ep-nav" hidden></div>
+    </section>
+
+    <div id="menu" hidden>
+      <header class="bar menu-top">
+        <button class="icon home" aria-label="トップのフォルダへ">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11 12 4l8.5 7M6 9v10.5h4.5V14h3v5.5H18V9" /></svg>
+        </button>
+        <button class="text back">‹ フォルダ</button>
+        <div class="heading">
+          <div class="series"></div>
+          <div class="title"></div>
+        </div>
+        <div class="menu-marks"></div>
+      </header>
+      <footer class="menu-bottom">
+        <div class="slider-row">
+          <input type="range" class="slider" min="1" max="1" step="1" aria-label="ページ" />
+          <span class="pageinfo"></span>
+        </div>
+        <div class="reading-metrics"></div>
+        <div class="actions">
+          <button class="text" data-action="toc">目次</button>
+          <button class="text" data-action="notes">付箋</button>
+          <button class="text" data-action="search">検索</button>
+          <button class="text" data-action="reload" title="長押しでページを再読み込み">再読み込み</button>
+          <button class="text" data-action="settings">表示設定</button>
+        </div>
+      </footer>
+    </div>
+
+    <div id="sheet" hidden>
+      <div class="sheet-panel">
+        <div class="sheet-body"></div>
+        <button class="close" aria-label="閉じる">×</button>
+      </div>
+    </div>
+
+    <div id="viewer" hidden>
+      <img alt="" />
+      <button class="close" aria-label="閉じる">×</button>
+    </div>
+
+    <div id="dialog" hidden>
+      <div class="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <div class="dialog-title" id="dialog-title"></div>
+        <div class="dialog-message"></div>
+        <div class="dialog-actions">
+          <button class="dialog-cancel"></button>
+          <button class="dialog-ok"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" hidden></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
