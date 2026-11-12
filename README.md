@@ -188,4 +188,6 @@ favicon（`public/icons/favicon-32.png` / `favicon-64.png`）は元画像を、�
 
 ## ライセンス
 
-同梱のフォント「倫明朝」（`public/fonts/`）は SIL Open Font License 1.1 で配布されている。詳しくは `public/fonts/OFL.txt` と `public/fonts/readme.txt` を参照。
+MIT License（`LICENSE` を参照）。
+
+ただし、同梱のフォント「倫明朝」（`public/fonts/`）は SIL Open Font License 1.1 で配布されている。詳しくは `public/fonts/OFL.txt` と `public/fonts/readme.txt` を参照。
