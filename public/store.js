@@ -453,10 +453,3 @@ async function doSync(onSync) {
     // サーバーに繋がらない（オフライン等）ときはローカルデータをそのまま使用
   }
 }
-
-// 旧バージョンで IndexedDB に保存されていた本文・ハッシュのデータベースを端末から完全に削除する
-if (typeof indexedDB !== 'undefined') {
-  try {
-    indexedDB.deleteDatabase('novelbook');
-  } catch {}
-}
