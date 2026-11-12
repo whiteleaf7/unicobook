@@ -1067,7 +1067,7 @@ button.home .unico-icon {
 /* スマホでは左右の端の本文も見えるよう、項目が収まるぎりぎりの幅にする */
 @media (max-width: 799px) {
   #sheet.settings .sheet-panel {
-    width: min(272px, 100% - 32px);
+    width: min(304px, 100% - 32px);
   }
 }
 
@@ -1566,6 +1566,11 @@ button.home .unico-icon {
   min-height: 36px;
   font-size: 20px;
   color: var(--accent);
+}
+
+.setting > span,
+.segmented button {
+  white-space: nowrap;
 }
 
 .segmented button {
