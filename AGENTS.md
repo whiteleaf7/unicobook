@@ -1,4 +1,4 @@
-# novelbook
+# unicobook
 
 ## ルール
 
@@ -7,7 +7,7 @@
 `server/` 配下のコード（サーバー処理）を変更した場合は、常駐している launchd サービスに反映させるため、必ずサーバーを再起動すること。
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/local.novelbook
+launchctl kickstart -k gui/$(id -u)/local.unicobook
 ```
 
 ### テスト実行

@@ -1,4 +1,4 @@
-// 小説フォルダ（NOVELBOOK_ROOT）を配信し、PWA 本体も配信するサーバー。
+// 小説フォルダ（UNICOBOOK_ROOT）を配信し、PWA 本体も配信するサーバー。
 // 小説フォルダへの書き込みは、Gemini で作ったフォルダのアイコン（icon.png）を置くときと、前の画像を icon~N.png として残すときだけ。
 // 127.0.0.1 だけで待ち受け、外からは `tailscale serve` 経由でアクセスする。
 
@@ -22,16 +22,16 @@ const env = (name: string) => process.env[name]?.trim() || undefined;
 const expandHome = (p: string) => (p === '~' || p.startsWith('~/') ? path.join(homedir(), p.slice(1)) : p);
 const envPath = (name: string, fallback: string) => path.resolve(expandHome(env(name) ?? fallback));
 
-if (!env('NOVELBOOK_ROOT')) {
-  console.error('NOVELBOOK_ROOT に配信する小説フォルダを指定してください（.env.example を参照）');
+if (!env('UNICOBOOK_ROOT')) {
+  console.error('UNICOBOOK_ROOT に配信する小説フォルダを指定してください（.env.example を参照）');
   process.exit(1);
 }
-const ROOT = envPath('NOVELBOOK_ROOT', '');
-const PORT = Number(env('NOVELBOOK_PORT') ?? 8787);
+const ROOT = envPath('UNICOBOOK_ROOT', '');
+const PORT = Number(env('UNICOBOOK_PORT') ?? 8787);
 const PUBLIC_DIR = path.resolve(import.meta.dirname, '../public');
-const IMAGE_CACHE_DIR = envPath('NOVELBOOK_CACHE_DIR', '~/Library/Caches/novelbook');
+const IMAGE_CACHE_DIR = envPath('UNICOBOOK_CACHE_DIR', '~/Library/Caches/unicobook');
 // サーバーが持つユーザーデータの置き場所。小説フォルダには書き込まないよう、ここに保存する
-const DATA_DIR = envPath('NOVELBOOK_DATA_DIR', '~/Library/Application Support/novelbook');
+const DATA_DIR = envPath('UNICOBOOK_DATA_DIR', '~/Library/Application Support/unicobook');
 // アプリで選んだフォルダのアイコン（プリセットと、画像より優先するか）
 const PRESETS_FILE = path.join(DATA_DIR, 'icons.json');
 // 設定・読書位置・お気に入りなど、ブラウザ間で共有するユーザーデータ
@@ -39,12 +39,12 @@ const STORE_DB_FILE = path.join(DATA_DIR, 'store.db');
 
 // フォルダのアイコンを作る Antigravity の CLI（サブスクの Gemini で画像を作る）。
 // launchd は PATH を読まないので実体のパスで呼ぶ
-const AGY = envPath('NOVELBOOK_AGY', '~/.local/bin/agy');
-const AGY_MODEL = env('NOVELBOOK_AGY_MODEL') ?? 'gemini-3.8-flash-medium';
+const AGY = envPath('UNICOBOOK_AGY', '~/.local/bin/agy');
+const AGY_MODEL = env('UNICOBOOK_AGY_MODEL') ?? 'gemini-3.8-flash-medium';
 // agy を動かす作業フォルダ
 const AGY_WORK_DIR = path.join(IMAGE_CACHE_DIR, 'generated');
 // agy が会話ごとに作ったファイルを置く場所。Gemini が作った画像もここ（brain/<会話 ID>/）に置かれる
-const AGY_BRAIN_DIR = envPath('NOVELBOOK_AGY_BRAIN_DIR', '~/.gemini/antigravity-cli/brain');
+const AGY_BRAIN_DIR = envPath('UNICOBOOK_AGY_BRAIN_DIR', '~/.gemini/antigravity-cli/brain');
 const GENERATED_IMAGE = /\.(png|jpe?g|webp)$/i;
 // 作っている間にフォルダの icon.png として置く「仮」のアイコン（scripts/make-placeholder-icon.swift で生成）
 const PLACEHOLDER_ICON = await readFile(path.resolve(import.meta.dirname, 'placeholder-icon.png'));
@@ -931,6 +931,6 @@ async function cleanNonExistentPositions() {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`novelbook: http://127.0.0.1:${PORT}/ (root: ${rootReal})`);
+  console.log(`unicobook: http://127.0.0.1:${PORT}/ (root: ${rootReal})`);
   cleanNonExistentPositions();
 });

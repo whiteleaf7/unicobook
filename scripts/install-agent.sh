@@ -1,13 +1,13 @@
 #!/bin/zsh
 # サーバーを launchd に登録して常駐させる（ログイン時に自動起動し、落ちたら再起動する）。
-#   scripts/install-agent.sh                 # .env の NOVELBOOK_ROOT を配信（.env.example を参照）
+#   scripts/install-agent.sh                 # .env の UNICOBOOK_ROOT を配信（.env.example を参照）
 #   scripts/install-agent.sh "/path/to/dir"  # 配信するフォルダを指定（.env より優先）
 #   scripts/install-agent.sh --uninstall     # 登録を解除
 set -euo pipefail
 
-LABEL=local.novelbook
+LABEL=local.unicobook
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$HOME/Library/Logs/novelbook.log"
+LOG="$HOME/Library/Logs/unicobook.log"
 REPO="${0:A:h:h}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -30,10 +30,10 @@ fi
 if [[ -n "$ROOT_ARG" ]]; then
   ROOT="${ROOT_ARG:A}"
 else
-  ROOT="$(cd "$REPO" && "$NODE" --env-file-if-exists=.env -p 'process.env.NOVELBOOK_ROOT?.trim() ?? ""')"
+  ROOT="$(cd "$REPO" && "$NODE" --env-file-if-exists=.env -p 'process.env.UNICOBOOK_ROOT?.trim() ?? ""')"
   [[ "$ROOT" == "~" || "$ROOT" == "~/"* ]] && ROOT="$HOME${ROOT#\~}"
   if [[ -z "$ROOT" ]]; then
-    echo "配信するフォルダを引数か .env の NOVELBOOK_ROOT で指定してください（.env.example を参照）" >&2
+    echo "配信するフォルダを引数か .env の UNICOBOOK_ROOT で指定してください（.env.example を参照）" >&2
     exit 1
   fi
 fi
@@ -64,7 +64,7 @@ cat > "$PLIST" <<EOF
 $(if [[ -n "$ROOT_ARG" ]]; then cat <<ENV
   <key>EnvironmentVariables</key>
   <dict>
-    <key>NOVELBOOK_ROOT</key><string>$(xml_escape "$ROOT")</string>
+    <key>UNICOBOOK_ROOT</key><string>$(xml_escape "$ROOT")</string>
   </dict>
 ENV
 fi)

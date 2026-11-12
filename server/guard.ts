@@ -4,8 +4,8 @@
 
 import type { IncomingHttpHeaders } from 'node:http';
 
-// ローカルと tailscale serve（<マシン名>.<tailnet>.ts.net）のホスト名。追加したいときは NOVELBOOK_ALLOWED_HOSTS にカンマ区切りで指定する
-const EXTRA_HOSTS = (process.env.NOVELBOOK_ALLOWED_HOSTS ?? '')
+// ローカルと tailscale serve（<マシン名>.<tailnet>.ts.net）のホスト名。追加したいときは UNICOBOOK_ALLOWED_HOSTS にカンマ区切りで指定する
+const EXTRA_HOSTS = (process.env.UNICOBOOK_ALLOWED_HOSTS ?? '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
   .filter(Boolean);

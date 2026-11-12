@@ -1,4 +1,4 @@
-# novelbook（ユニコブック）
+# ユニコブック（unicobook）
 
 iPhone で読む、青空文庫形式の縦書き小説ビューワ（PWA）。
 Mac が小説フォルダ（iCloud Drive など）を配信し、iPhone は Tailscale 経由でそれを読む。PC のブラウザでも読める。
@@ -40,7 +40,7 @@ PC のブラウザでは、本文を見開きくらいの幅に収める。
 iPhone（Safari / ホーム画面の PWA）
    │  HTTPS（Tailscale）
    ▼
-tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説フォルダ（NOVELBOOK_ROOT）
+tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説フォルダ（UNICOBOOK_ROOT）
 ```
 
 - `server/server.ts`: 小説フォルダと PWA を配信する Node のサーバー（依存なし）。`127.0.0.1` だけで待ち受け、外からは `tailscale serve` 経由でアクセスする。ほかのサイトからのリクエストは Host・Origin・Sec-Fetch-Site を見て断る
@@ -50,12 +50,12 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
   - `store.js`: 設定・読書位置・印などの保存と、サーバーとの同期
   - `sw.js`: オフライン用のキャッシュ（つながるときは常に最新を取る）
 
-小説フォルダに書き込むのは、Gemini で作ったアイコンを置くときだけ。読書位置や設定は `NOVELBOOK_DATA_DIR` に保存する。
+小説フォルダに書き込むのは、Gemini で作ったアイコンを置くときだけ。読書位置や設定は `UNICOBOOK_DATA_DIR` に保存する。
 
 ### 小説フォルダの置き方
 
 ```
-小説フォルダ（NOVELBOOK_ROOT）
+小説フォルダ（UNICOBOOK_ROOT）
 ├── 銀河鉄道の夜/            ← シリーズ（直下のフォルダ）
 │   ├── icon.png             ← あればフォルダのアイコンになる
 │   ├── 01 一　午後の授業.txt
@@ -67,12 +67,12 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
 ```
 
 - 1 話 1 ファイルの前提で、目次は同じフォルダのテキストファイルをファイル名順に並べたもの（数字は自然な順に並ぶ）。最後のページには次の話へのリンクを出す
-- 挿絵は、テキストファイルからの相対パスで書く（例: `［＃挿絵（fig1.jpg）入る］` なら同じフォルダの `fig1.jpg`）。大きな画像は Mac 側で長辺 2000px に縮小して返し、`NOVELBOOK_CACHE_DIR` にキャッシュする
+- 挿絵は、テキストファイルからの相対パスで書く（例: `［＃挿絵（fig1.jpg）入る］` なら同じフォルダの `fig1.jpg`）。大きな画像は Mac 側で長辺 2000px に縮小して返し、`UNICOBOOK_CACHE_DIR` にキャッシュする
 
 ### フォルダのアイコン
 
 - フォルダに `icon.png`（`icon.jpg` / `icon.webp` なども可）を置くと、そのフォルダのアイコンになる
-- アプリでフォルダのアイコンをタップすると、プリセットのアイコン（記号・アルファベット・数字）からも選べる。選択は `NOVELBOOK_DATA_DIR` の `icons.json` に保存する
+- アプリでフォルダのアイコンをタップすると、プリセットのアイコン（記号・アルファベット・数字）からも選べる。選択は `UNICOBOOK_DATA_DIR` の `icons.json` に保存する
 - フォルダに置いた画像はプリセットより優先されるが、アイコンを選ぶシートのチェックボックスでプリセットを優先させることもできる
 - アイコンを選ぶシートの「Gemini で作る」では、フォルダ名（と任意の追加の指示）から Gemini にアイコンを作ってもらい、フォルダの `icon.png` にする。Mac 側で作り、できあがるまでは「仮」のアイコンを置いておく。前の画像はフォルダに `icon~1.png`、`icon~2.png`…と番号が大きいほど新しくなるように残し、作れなかったときは元に戻す
 - 続きを読むや各一覧では、作品の入っているシリーズのアイコンを出す
@@ -84,16 +84,16 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
 ### Mac
 
 ```sh
-cp .env.example .env                # 配信するフォルダ（NOVELBOOK_ROOT）などを書き換える
+cp .env.example .env                # 配信するフォルダ（UNICOBOOK_ROOT）などを書き換える
 scripts/install-agent.sh            # launchd に登録（ログイン時に自動起動）
 tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開
 ```
 
-- 配信するフォルダは `.env` の `NOVELBOOK_ROOT`。`scripts/install-agent.sh "/path/to/dir"` のように引数でも指定できる
+- 配信するフォルダは `.env` の `UNICOBOOK_ROOT`。`scripts/install-agent.sh "/path/to/dir"` のように引数でも指定できる
 - 小説フォルダが iCloud Drive にあるときは、初回に macOS が node の iCloud Drive へのアクセス許可を求める。許可しないとフォルダ一覧が読めない
 - nodenv があれば node はシム経由で起動し、バージョンは `.node-version` で決まる。node を入れ替えたら再起動する（下の「サーバーの再起動」）
 - iCloud の「Mac ストレージを最適化」で本体が消えているファイルは、開くときにダウンロードを待つ。小説フォルダは Finder で「ダウンロードを保持」にしておくと速い
-- ログ: `~/Library/Logs/novelbook.log`。解除: `scripts/install-agent.sh --uninstall`
+- ログ: `~/Library/Logs/unicobook.log`。解除: `scripts/install-agent.sh --uninstall`
 - `tailscale` コマンドがなければ `/Applications/Tailscale.app/Contents/MacOS/Tailscale` を使う
 
 ### 設定
@@ -102,14 +102,14 @@ tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開
 
 | 変数 | 既定値 | 内容 |
 | --- | --- | --- |
-| `NOVELBOOK_ROOT` | （必須） | 配信する小説フォルダ |
-| `NOVELBOOK_PORT` | `8787` | 待ち受けるポート（`127.0.0.1` だけで待ち受ける） |
-| `NOVELBOOK_ALLOWED_HOSTS` | なし | `localhost` と `*.ts.net` 以外のホスト名でアクセスするときに、カンマ区切りで追加する |
-| `NOVELBOOK_DATA_DIR` | `~/Library/Application Support/novelbook` | 読書位置・設定・印・アイコンの選択などの保存先 |
-| `NOVELBOOK_CACHE_DIR` | `~/Library/Caches/novelbook` | 縮小した画像や、アイコンを作るときの作業ファイルの置き場所 |
-| `NOVELBOOK_AGY` | `~/.local/bin/agy` | Gemini でアイコンやあらすじを作るときに使う Antigravity の CLI |
-| `NOVELBOOK_AGY_MODEL` | `gemini-3.8-flash-medium` | そのとき使うモデル |
-| `NOVELBOOK_AGY_BRAIN_DIR` | `~/.gemini/antigravity-cli/brain` | Antigravity の CLI が会話ごとのファイルを置く場所 |
+| `UNICOBOOK_ROOT` | （必須） | 配信する小説フォルダ |
+| `UNICOBOOK_PORT` | `8787` | 待ち受けるポート（`127.0.0.1` だけで待ち受ける） |
+| `UNICOBOOK_ALLOWED_HOSTS` | なし | `localhost` と `*.ts.net` 以外のホスト名でアクセスするときに、カンマ区切りで追加する |
+| `UNICOBOOK_DATA_DIR` | `~/Library/Application Support/unicobook` | 読書位置・設定・印・アイコンの選択などの保存先 |
+| `UNICOBOOK_CACHE_DIR` | `~/Library/Caches/unicobook` | 縮小した画像や、アイコンを作るときの作業ファイルの置き場所 |
+| `UNICOBOOK_AGY` | `~/.local/bin/agy` | Gemini でアイコンやあらすじを作るときに使う Antigravity の CLI |
+| `UNICOBOOK_AGY_MODEL` | `gemini-3.8-flash-medium` | そのとき使うモデル |
+| `UNICOBOOK_AGY_BRAIN_DIR` | `~/.gemini/antigravity-cli/brain` | Antigravity の CLI が会話ごとのファイルを置く場所 |
 
 Gemini を使う機能（アイコン作り・あらすじ）は、Mac で `agy` にログインしておく必要がある。使わないなら設定しなくてよい。アイコンは 1 枚に 2〜3 分かかる。
 
@@ -118,7 +118,7 @@ Gemini を使う機能（アイコン作り・あらすじ）は、Mac で `agy`
 `server/` や `.env` を変えたときや、nodenv で node を入れ替えたときは、常駐しているサーバーを再起動する。
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/local.novelbook
+launchctl kickstart -k gui/$(id -u)/local.unicobook
 ```
 
 - サーバーは起動したときの node で動き続ける。再起動しないまま古い版の node を消すと、iCloud Drive が読めなくなる（`EPERM: operation not permitted, scandir ...`）

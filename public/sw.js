@@ -1,7 +1,7 @@
 // つながるときは常にサーバーから最新を取り、つながらないときは最後に取得したものを返す。
 // サーバーは ETag を返すので、変更がなければ 304 で済み、通信量は小さい。
 
-const CACHE = 'novelbook-v9';
+const CACHE = 'unicobook-v1';
 const SHELL = [
   './',
   'index.html',

@@ -14,7 +14,7 @@ test('Host はローカルと ts.net だけ許可する', () => {
   }
 });
 
-test('NOVELBOOK_ALLOWED_HOSTS で追加したホストを許可する', () => {
+test('UNICOBOOK_ALLOWED_HOSTS で追加したホストを許可する', () => {
   assert.equal(isAllowedHost('novel.example.com', []), false);
   assert.equal(isAllowedHost('novel.example.com:443', ['novel.example.com']), true);
 });
