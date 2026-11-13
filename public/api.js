@@ -23,6 +23,12 @@ async function post(url, body, { timeoutMs = 10000 } = {}) {
   }
 }
 
+// JSON を返す API。Service Worker がキャッシュから返したかも添える
+async function getJson(url) {
+  const { res, fromCache } = await get(url);
+  return { ...(await res.json()), fromCache };
+}
+
 const q = (path) => `path=${encodeURIComponent(path)}`;
 
 // サーバーに保存した設定・読書位置・お気に入りなどのユーザーデータ
@@ -36,20 +42,17 @@ export async function saveStorePatch(patch) {
 }
 
 export async function fetchList(path) {
-  const { res, fromCache } = await get(`api/list?${q(path)}`);
-  return { ...(await res.json()), fromCache };
+  return getJson(`api/list?${q(path)}`);
 }
 
 export async function fetchRecentlyUpdated(limit) {
-  const { res, fromCache } = await get(`api/recent?limit=${limit}`);
-  return { ...(await res.json()), fromCache };
+  return getJson(`api/recent?limit=${limit}`);
 }
 
 // 小説フォルダ全体からの検索。series を渡すと、そのシリーズの中だけを探す
 export async function searchAll(query, series = null) {
   const scope = series ? `&${q(series)}` : '';
-  const { res, fromCache } = await get(`api/search?q=${encodeURIComponent(query)}${scope}`);
-  return { ...(await res.json()), fromCache };
+  return getJson(`api/search?q=${encodeURIComponent(query)}${scope}`);
 }
 
 // パスごとの話の更新日時（ファイルならそれ自身、フォルダなら下のテキストファイル）。{ [path]: [{ path, mtime }] }
@@ -67,26 +70,14 @@ export async function fetchStat(path) {
   return res.json();
 }
 
-// 差分検知用の起点ハッシュ値（前回の各行の指紋）をサーバーから取得する
+// 変更箇所の印の基準にする、前回の本文の行ごとの指紋（ハッシュ値）。取れなければ null
 export async function fetchBaseline(path) {
-  try {
-    const { res } = await get(`api/baseline?${q(path)}`);
-    const data = await res.json();
-    return data.hashes ?? null;
-  } catch {
-    return null;
-  }
+  return (await getJson(`api/baseline?${q(path)}`).catch(() => null))?.hashes ?? null;
 }
 
-// 差分比較用の起点テキスト（前回の本文全文）をサーバーから取得する
+// 変更箇所の差分を見せるための、前回の本文の全文。取れなければ null
 export async function fetchBaselineText(path) {
-  try {
-    const { res } = await get(`api/baseline-text?${q(path)}`);
-    const data = await res.json();
-    return data.text ?? null;
-  } catch {
-    return null;
-  }
+  return (await getJson(`api/baseline-text?${q(path)}`).catch(() => null))?.text ?? null;
 }
 
 export function imageUrl(path) {
@@ -105,12 +96,12 @@ export async function generateIcon(dirPath, hint) {
   await post(`api/icon/generate?${q(dirPath)}`, { hint });
 }
 
-// 設定資料（全体ロードマップやキャラシート）から、Gemini であらすじ・登場人物リストを生成する
+// 設定資料（全体ロードマップやキャラシート）から Gemini で作った、あらすじ・登場人物リスト
 export async function fetchSummary(dirPath) {
-  const { res } = await get(`api/summary?${q(dirPath)}`);
-  return await res.json();
+  return getJson(`api/summary?${q(dirPath)}`);
 }
 
+// あらすじ・登場人物リストを作り直す。作り終わるまで数分かかる
 export async function generateSummary(dirPath) {
   return await post(`api/summary?${q(dirPath)}`, {}, { timeoutMs: 240000 });
 }
