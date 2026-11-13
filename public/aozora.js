@@ -40,8 +40,8 @@ const HEADING = {
 
 const SIZE_STEPS = [1, 1.2, 1.4, 1.6, 1.8];
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+export function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 }
 
 const TCY_TAG = '<span class="tcy">';
@@ -71,7 +71,9 @@ function toHalfDigits(s) {
 function inlineDecoration(name) {
   if (EMPHASIS[name]) return `<span class="em" style="text-emphasis:${EMPHASIS[name]};-webkit-text-emphasis:${EMPHASIS[name]}">`;
   if (SIDELINE[name]) return `<span class="sl" style="text-decoration-style:${SIDELINE[name]}">`;
-  if (HEADING[name.replace(/^(同行|窓)/, '')]) return `<span class="${HEADING[name.replace(/^(同行|窓)/, '')]}">`;
+  // 同行見出し・窓見出しも、ふつうの見出しと同じ見た目にする
+  const heading = HEADING[name.replace(/^(同行|窓)/, '')];
+  if (heading) return `<span class="${heading}">`;
   if (name === '縦中横') return TCY_TAG;
   if (name === '太字') return '<b>';
   if (name === '斜体') return '<i>';
@@ -366,7 +368,6 @@ function lineStyle(indent, align) {
   return styles.length ? ` style="${styles.join(';')}"` : '';
 }
 
-// resolveImage(相対パス) は表示用の URL を返す関数
 // 本文を行に分ける。表示の行番号（data-l）・変更箇所の比較・検索はすべてこの行番号を使う
 export function sourceLines(source) {
   return stripAozoraHeaderNotes(source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'));
@@ -388,12 +389,8 @@ export function plainLine(line) {
 // 本文の文字数を数える。ルビの読み・注記・空白・改行は除く
 export function countAozoraCharacters(source) {
   if (!source) return 0;
-  const lines = sourceLines(source);
   let count = 0;
-  for (const line of lines) {
-    const plain = plainLine(line).replace(/\s+/g, '');
-    count += [...plain].length;
-  }
+  for (const line of sourceLines(source)) count += [...plainLine(line).replace(/\s+/g, '')].length;
   return count;
 }
 
@@ -405,6 +402,7 @@ export function calculateReadingMetrics(source) {
   return { chars, manuscriptPages, readingMinutes };
 }
 
+// resolveImage(相対パス) は挿絵の表示用の URL を返す関数
 export function parseAozora(source, resolveImage = (p) => p) {
   const lines = sourceLines(source);
   const block = { indent: null, align: null, decorations: [] };

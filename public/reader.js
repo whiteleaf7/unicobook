@@ -1,7 +1,7 @@
 // 縦書きのページ表示。本文を CSS の段組みで「ページの高さ = 1 段」に分割し、
 // 溢れた段が下に積み重なったものを translateY でずらして 1 ページずつ見せる。
 
-import { parseAozora, decodeText, sourceLines, textHtml, calculateReadingMetrics } from './aozora.js';
+import { parseAozora, decodeText, sourceLines, textHtml, escapeHtml, calculateReadingMetrics } from './aozora.js';
 import { fetchText, fetchStat, imageUrl, dirname, joinPath } from './api.js';
 import { getPosition, setPosition, getBaseline, setBaseline, getBaselineText, setBaselineText, syncSettled, getNotesForPath, saveNote, deleteNote } from './store.js';
 import { changedLines, lineHashes, detailedDiff } from './diff.js';
@@ -16,6 +16,8 @@ const SLIDE_MS = 180;
 const COMMIT_RATIO = 0.25;
 // これより速く払っていれば、動かした距離が短くてもめくる（px/ms）
 const FLICK_VELOCITY = 0.4;
+// 変更前の本文がサーバーにないときに、変更前の欄に出す文言
+export const BASELINE_MISSING = '（変更前のテキストは保存されていません）';
 // 挿絵のダブルタップとみなす間隔
 const DOUBLE_TAP_MS = 300;
 // 上端の付箋エリアの長押しとみなす時間と、上端からの判定幅（px）
@@ -24,10 +26,6 @@ const NOTE_AREA_HEIGHT = 48;
 // ホイールでめくるのに要る量（px）と、続けてめくるときの最短の間隔
 const WHEEL_THRESHOLD = 10;
 const WHEEL_INTERVAL_MS = 50;
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-}
 
 // ゴシックは明朝より太く見えるので一段細くする。iPhone のヒラギノ角ゴは W3 より細い太さがないので変わらない
 export const FONTS = {
@@ -70,6 +68,15 @@ function rangeIn(nodes, from, to) {
   range.setStart(...at(from, false));
   range.setEnd(...at(to, true));
   return range;
+}
+
+// 付箋を、保存した読書位置と同じ形にする（locate や pageOf に渡すため）
+const notePosition = (note) => ({ line: note.line, off: note.off ?? 0, snippet: note.snippet });
+
+function vibrate() {
+  try {
+    navigator.vibrate?.(50);
+  } catch {}
 }
 
 function textNodes(el) {
@@ -126,18 +133,14 @@ export class Reader {
     this.changeLines = [];
     this.changeIndex = -1;
     this.changesEl = el.querySelector('.changes');
-    this.changesEl.querySelector('.next-change').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.nextChange();
-    });
-    this.changesEl.querySelector('.diff-detail')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.showCurrentDiffDetail();
-    });
-    this.changesEl.querySelector('.close-changes').addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.clearChanges();
-    });
+    const onChangesButton = (selector, action) =>
+      this.changesEl.querySelector(selector)?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        action();
+      });
+    onChangesButton('.next-change', () => this.nextChange());
+    onChangesButton('.diff-detail', () => this.showCurrentDiffDetail());
+    onChangesButton('.close-changes', () => this.clearChanges());
     this.changesEl.addEventListener('pointerdown', (e) => e.stopPropagation());
     // マウスで押してもフォーカスを移さない。移すと、続けてキーでページをめくったときにフォーカスの枠が出てしまう
     this.changesEl.addEventListener('mousedown', (e) => e.preventDefault());
@@ -186,10 +189,7 @@ export class Reader {
     if (this.path !== path) return { fromCache };
     this.nextEpisode = next;
     this.prevEpisode = prev;
-    this.rawText = decodeText(buffer);
-    this.lines = sourceLines(this.rawText);
-    this.metrics = calculateReadingMetrics(this.rawText);
-    this.render(this.rawText, mtime);
+    this.setText(buffer, mtime);
     if (baselineHashes) {
       this.baseline = baselineHashes;
       this.markChanges();
@@ -211,12 +211,25 @@ export class Reader {
     if (this.anchor) this.persist();
     else this.save();
     this.markNotes();
-    if (document.fonts && document.fonts.status === 'loading') {
-      document.fonts.ready.then(() => {
-        if (this.path === path) this.relayout();
-      });
-    }
+    this.relayoutWhenFontsLoad();
     return { fromCache };
+  }
+
+  // 読み込んだファイルの中身を、今の本文にして描く
+  setText(buffer, mtime) {
+    this.rawText = decodeText(buffer);
+    this.lines = sourceLines(this.rawText);
+    this.metrics = calculateReadingMetrics(this.rawText);
+    this.render(this.rawText, mtime);
+  }
+
+  // フォントを読み込んでいる最中なら、読み込み終わってから組み直す（文字の大きさが変わってページがずれるため）
+  relayoutWhenFontsLoad() {
+    if (document.fonts?.status !== 'loading') return;
+    const path = this.path;
+    document.fonts.ready.then(() => {
+      if (this.path && this.path === path) this.relayout();
+    });
   }
 
   getReadingMetrics() {
@@ -241,10 +254,7 @@ export class Reader {
     this.peekNotesEl.replaceChildren();
     this.nextEpisode = null;
     this.prevEpisode = null;
-    if (this.epNavEl) {
-      this.epNavEl.hidden = true;
-      this.epNavEl.replaceChildren();
-    }
+    this.hideNavGuide();
   }
 
   render(text, mtime) {
@@ -267,16 +277,9 @@ export class Reader {
   // 本文と同じ縦書きにし、めくる向きへ動く矢印を添えて、めくれば移れることを見せる
   updateNavGuide() {
     if (!this.epNavEl) return;
-    const dir =
-      this.page === this.pages - 1 && this.nextEpisode
-        ? 'next'
-        : this.page === 0 && this.prevEpisode
-          ? 'prev'
-          : null;
+    const dir = this.episodeBeyond('next') ? 'next' : this.episodeBeyond('prev') ? 'prev' : null;
     if (!dir) {
-      this.epNavEl.hidden = true;
-      this.epNavEl.replaceChildren();
-      delete this.epNavEl.dataset.dir;
+      this.hideNavGuide();
       return;
     }
     const episode = dir === 'next' ? this.nextEpisode : this.prevEpisode;
@@ -295,16 +298,26 @@ export class Reader {
     });
   }
 
+  hideNavGuide() {
+    if (!this.epNavEl) return;
+    this.epNavEl.hidden = true;
+    this.epNavEl.replaceChildren();
+    delete this.epNavEl.dataset.dir;
+  }
+
+  // 今が最後のページなら次の話（direction が 'next'）、最初のページなら前の話（'prev'）。なければ null
+  episodeBeyond(direction) {
+    if (direction === 'next') return this.page === this.pages - 1 ? this.nextEpisode : null;
+    return this.page === 0 ? this.prevEpisode : null;
+  }
+
   // サーバー上のファイルを読み直す。更新されていれば今の位置を保ったまま表示し直す
   async reload() {
     const { buffer, mtime, fromCache } = await fetchText(this.path);
     if (mtime === this.mtime) return { changed: false, fromCache };
     const before = this.hashes;
     const beforeLines = this.lines;
-    this.rawText = decodeText(buffer);
-    this.lines = sourceLines(this.rawText);
-    this.metrics = calculateReadingMetrics(this.rawText);
-    this.render(this.rawText, mtime);
+    this.setText(buffer, mtime);
     // 基準の指紋がまだ届いていなければ、表示していた本文と比べる
     this.baseline ??= before;
     this.baselineLines ??= beforeLines;
@@ -348,11 +361,7 @@ export class Reader {
     }
     this.relayout();
     this.persist();
-    if (document.fonts && document.fonts.status === 'loading') {
-      document.fonts.ready.then(() => {
-        if (this.path) this.relayout();
-      });
-    }
+    this.relayoutWhenFontsLoad();
   }
 
   // 位置の計算でレイアウトが同期的に確定するので、フレームを待たずに組み直す。
@@ -394,25 +403,15 @@ export class Reader {
 
   // 要素内の最後の非空白文字が表示されている段（ページ番号）を返す
   lastCharCol(el) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n.parentElement?.closest('rt')) continue;
-      nodes.push(n);
-    }
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      const node = nodes[i];
-      const text = node.data;
-      for (let j = text.length - 1; j >= 0; j--) {
-        if (!/\s/.test(text[j])) {
-          const range = document.createRange();
-          range.setStart(node, j);
-          range.setEnd(node, j + 1);
-          const rect = range.getBoundingClientRect();
-          if (rect.height > 0 || rect.width > 0) {
-            return this.colOf(rect.top + rect.height / 2);
-          }
-        }
+    const { nodes } = visibleText(el);
+    for (const { node } of [...nodes].reverse()) {
+      for (let j = node.data.length - 1; j >= 0; j--) {
+        if (/\s/.test(node.data[j])) continue;
+        const range = document.createRange();
+        range.setStart(node, j);
+        range.setEnd(node, j + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect.height > 0 || rect.width > 0) return this.colOf(rect.top + rect.height / 2);
       }
     }
     return null;
@@ -499,61 +498,54 @@ export class Reader {
     if (!notes.length) return;
     const origin = this.content.getBoundingClientRect();
     for (const note of notes) {
-      const target = this.locate({ line: note.line, off: note.off ?? 0, snippet: note.snippet });
+      const target = this.locate(notePosition(note));
       if (!target) continue;
       target.el.classList.add('has-note');
       const nodes = textNodes(target.el);
       const rect = (nodes.length ? this.charRect(nodes, target.off) : null) ?? target.el.getBoundingClientRect();
       if (!rect.width && !rect.height) continue;
+      // 印は付箋を付けた文字の行の上で、その文字のあるページの上端に置く
       const col = this.colOf(rect.top + Math.min(rect.height, this.stride) / 2);
-      const cx = rect.right - Math.min(rect.width, 40) / 2 - origin.left;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'note-mark';
-      btn.dataset.noteId = note.id;
-      if (note.text) btn.classList.add('with-text');
-      btn.title = note.text ? `付箋: ${note.text}` : '付箋';
-      btn.setAttribute('aria-label', note.text ? `付箋: ${note.text}` : '付箋を開く');
-      btn.style.left = `${cx}px`;
-      btn.style.top = `${col * this.stride}px`;
-      btn.innerHTML =
-        '<span class="note-mark-tab">' +
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.2L6 21z"/></svg>' +
-        '</span>';
-      btn.addEventListener('mousedown', (e) => e.preventDefault());
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (Date.now() < this.suppressNoteClickUntil) return;
-        this.onNoteOpen?.(note.line, note.id);
-      });
-      this.notesEl.append(btn);
+      const left = rect.right - Math.min(rect.width, 40) / 2 - origin.left;
+      this.notesEl.append(this.noteMark(note, left, col * this.stride));
     }
     this.peekDirty = true;
   }
 
+  noteMark(note, left, top) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'note-mark';
+    btn.dataset.noteId = note.id;
+    if (note.text) btn.classList.add('with-text');
+    btn.title = note.text ? `付箋: ${note.text}` : '付箋';
+    btn.setAttribute('aria-label', note.text ? `付箋: ${note.text}` : '付箋を開く');
+    btn.style.left = `${left}px`;
+    btn.style.top = `${top}px`;
+    btn.innerHTML =
+      '<span class="note-mark-tab">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.2L6 21z"/></svg>' +
+      '</span>';
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 長押しで付箋を付け外しした直後の click では開かない
+      if (Date.now() < this.suppressNoteClickUntil) return;
+      this.onNoteOpen?.(note.line, note.id);
+    });
+    return btn;
+  }
+
   // 今のページの付箋をつけ外しする
+  // noteId を渡したときはその付箋を外す
   togglePageNote(noteId = null) {
     if (!this.path) return;
-    const notes = getNotesForPath(this.path);
     if (noteId) {
       deleteNote(noteId);
-      this.markNotes();
-      return;
-    }
-    const notesOnPage = notes.filter(
-      (n) => this.pageOf({ line: n.line, off: n.off ?? 0, snippet: n.snippet }) === this.page,
-    );
-    if (notesOnPage.length > 0) {
-      for (const n of notesOnPage) deleteNote(n.id);
     } else {
-      const info = this.currentLineInfo();
-      saveNote({
-        path: this.path,
-        line: info.line,
-        off: info.off,
-        snippet: info.snippet,
-        text: '',
-      });
+      const notesOnPage = getNotesForPath(this.path).filter((n) => this.pageOf(notePosition(n)) === this.page);
+      if (notesOnPage.length) for (const n of notesOnPage) deleteNote(n.id);
+      else saveNote({ path: this.path, ...this.currentLineInfo(), text: '' });
     }
     this.markNotes();
   }
@@ -566,7 +558,7 @@ export class Reader {
 
   jumpToNote(note) {
     if (!note) return;
-    this.go(this.pageOf({ line: note.line, off: note.off ?? 0, snippet: note.snippet }));
+    this.go(this.pageOf(notePosition(note)));
   }
 
   updateChanges() {
@@ -611,39 +603,27 @@ export class Reader {
       const text = await getBaselineText(this.path);
       if (text && this.path) this.baselineLines = sourceLines(text);
     }
-    let allHunks = [];
-    if (this.baselineLines) {
-      allHunks = detailedDiff(this.baselineLines, this.lines);
+    let hunks = this.baselineLines ? detailedDiff(this.baselineLines, this.lines) : [];
+    // 変更前の本文がサーバーにないときは、変わった行だけを見せる
+    if (!hunks.length) {
+      hunks = this.changeLines.map((line) => ({ line, deleted: [BASELINE_MISSING], added: [this.lines[line] ?? ''] }));
     }
-    // baselineLines が未取得または差分なしの場合のフォールバック
-    if (!allHunks.length) {
-      allHunks = this.changeLines.map((line) => ({
-        line,
-        deleted: ['（変更前のテキストは保存されていません）'],
-        added: [this.lines[line] ?? ''],
-      }));
-    }
-    if (!allHunks.length) return;
+    const index = this.hunkIndexFor(hunks, targetLine);
+    this.onDiffDetail?.(hunks[index], hunks, index);
+  }
 
-    let hunkIndex = 0;
+  // targetLine（タップした行）を含む変更のまとまり。なければその後ろの最初のまとまり。
+  // targetLine がなければ、変更箇所の移動で今いるまとまり
+  hunkIndexFor(hunks, targetLine) {
     if (targetLine !== null) {
-      const idx = allHunks.findIndex((h) => {
-        const start = h.line;
-        const end = h.line + Math.max(h.added.length, 1);
-        return targetLine >= start && targetLine <= end;
-      });
-      if (idx >= 0) {
-        hunkIndex = idx;
-      } else {
-        const nextIdx = allHunks.findIndex((h) => h.line >= targetLine);
-        hunkIndex = nextIdx >= 0 ? nextIdx : allHunks.length - 1;
-      }
-    } else if (this.changeIndex >= 0 && this.changeIndex < this.changeLines.length) {
-      const line = this.changeLines[this.changeIndex];
-      const idx = allHunks.findIndex((h) => h.line >= line);
-      if (idx >= 0) hunkIndex = idx;
+      const containing = hunks.findIndex((h) => targetLine >= h.line && targetLine <= h.line + Math.max(h.added.length, 1));
+      if (containing >= 0) return containing;
+      const after = hunks.findIndex((h) => h.line >= targetLine);
+      return after >= 0 ? after : hunks.length - 1;
     }
-    this.onDiffDetail?.(allHunks[hunkIndex], allHunks, hunkIndex);
+    const line = this.changeLines[this.changeIndex];
+    if (line === undefined) return 0;
+    return Math.max(0, hunks.findIndex((h) => h.line >= line));
   }
 
   // 本文から query を探す。大文字と小文字は区別しない
@@ -656,13 +636,18 @@ export class Reader {
       const { text, nodes } = visibleText(el);
       const lower = text.toLowerCase();
       for (let i = lower.indexOf(q); i >= 0 && results.length < SEARCH_LIMIT; i = lower.indexOf(q, i + q.length)) {
-        const range = rangeIn(nodes, i, i + q.length);
-        const rect = range.getBoundingClientRect();
         const from = Math.max(0, i - 15);
-        results.push({ range, page: this.colOf(rect.top + rect.height / 2), snippet: text.slice(from, i + q.length + 25), at: i - from, length: q.length });
+        results.push({ ...this.matchAt(nodes, i, q.length), snippet: text.slice(from, i + q.length + 25), at: i - from, length: q.length });
       }
     }
     return results;
+  }
+
+  // テキストノードの並び nodes の、at から length 文字の範囲と、それがあるページ
+  matchAt(nodes, at, length) {
+    const range = rangeIn(nodes, at, at + length);
+    const rect = range.getBoundingClientRect();
+    return { range, page: this.colOf(rect.top + rect.height / 2) };
   }
 
   setHighlight(range) {
@@ -697,9 +682,7 @@ export class Reader {
       const q = query.trim();
       const i = text.toLowerCase().indexOf(q.toLowerCase());
       if (i >= 0) {
-        const range = rangeIn(nodes, i, i + q.length);
-        const rect = range.getBoundingClientRect();
-        this.showMatch({ range, page: this.colOf(rect.top + rect.height / 2) });
+        this.showMatch(this.matchAt(nodes, i, q.length));
         return;
       }
     }
@@ -710,9 +693,7 @@ export class Reader {
   dragTo(dx) {
     const target = dx > 0 ? this.page + 1 : this.page - 1;
     const exists = dx !== 0 && target >= 0 && target < this.pages;
-    const canAdvance =
-      (dx > 0 && this.page === this.pages - 1 && Boolean(this.nextEpisode)) ||
-      (dx < 0 && this.page === 0 && Boolean(this.prevEpisode));
+    const canAdvance = dx !== 0 && Boolean(this.episodeBeyond(dx > 0 ? 'next' : 'prev'));
     // 最初と最後のページでは、次話/前話へ進める場合でも少し抵抗をつけて端であることを伝える
     const x = exists ? dx : canAdvance ? dx * 0.5 : dx * 0.3;
     this.pageEl.style.transform = `translate3d(${x}px, 0, 0)`;
@@ -734,34 +715,21 @@ export class Reader {
     const commit =
       forward > -FLICK_VELOCITY && (Math.abs(dx) > width * COMMIT_RATIO || forward > FLICK_VELOCITY);
 
-    // 次の話または前の話へのシームレス遷移
-    if (target === null && commit) {
-      if (dx > 0 && this.page === this.pages - 1 && this.nextEpisode) {
-        this.sliding = true;
-        this.pageEl.style.transition = `transform ${SLIDE_MS}ms ease-out`;
-        this.pageEl.style.transform = `translate3d(${width}px, 0, 0)`;
-        setTimeout(() => {
-          this.pageEl.style.transition = '';
-          this.pageEl.style.transform = '';
-          this.peekEl.hidden = true;
-          this.sliding = false;
-          this.onNavigateEpisode?.('next', this.nextEpisode);
-        }, SLIDE_MS);
-        return;
-      }
-      if (dx < 0 && this.page === 0 && this.prevEpisode) {
-        this.sliding = true;
-        this.pageEl.style.transition = `transform ${SLIDE_MS}ms ease-out`;
-        this.pageEl.style.transform = `translate3d(${-width}px, 0, 0)`;
-        setTimeout(() => {
-          this.pageEl.style.transition = '';
-          this.pageEl.style.transform = '';
-          this.peekEl.hidden = true;
-          this.sliding = false;
-          this.onNavigateEpisode?.('prev', this.prevEpisode);
-        }, SLIDE_MS);
-        return;
-      }
+    // 最後のページから右へ、最初のページから左へ払ったら、ページを画面の外へ送ってから次の話・前の話へ移る
+    const direction = dx > 0 ? 'next' : 'prev';
+    const episode = this.episodeBeyond(direction);
+    if (target === null && commit && dx !== 0 && episode) {
+      this.sliding = true;
+      this.pageEl.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+      this.pageEl.style.transform = `translate3d(${Math.sign(dx) * width}px, 0, 0)`;
+      setTimeout(() => {
+        this.pageEl.style.transition = '';
+        this.pageEl.style.transform = '';
+        this.peekEl.hidden = true;
+        this.sliding = false;
+        this.onNavigateEpisode?.(direction, episode);
+      }, SLIDE_MS);
+      return;
     }
 
     const x = commit && target !== null ? Math.sign(dx) * width : 0;
@@ -963,9 +931,7 @@ export class Reader {
           longPressTimer = null;
           start = null;
           this.suppressNoteClickUntil = Date.now() + 800;
-          try {
-            navigator.vibrate?.(50);
-          } catch {}
+          vibrate();
           this.togglePageNote(targetNoteId);
         }, LONG_PRESS_MS);
       }
