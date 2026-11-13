@@ -225,9 +225,14 @@ launchctl kickstart -k gui/$(id -u)/local.unicobook
 
 ## 開発
 
+動かすだけなら依存パッケージは要りませんが、整形（Biome）とリント（oxlint）を使うときは、先に `pnpm install` を実行してください。
+
 ```sh
-pnpm start  # サーバーを起動する（設定は .env）
-pnpm test   # テストを実行する
+pnpm install  # 整形とリントの道具を入れる（開発するときだけ）
+pnpm start    # サーバーを起動する（設定は .env）
+pnpm test     # テストを実行する
+pnpm format   # 整形する
+pnpm lint     # リントと型チェックをする
 swift scripts/make-icons.swift public/icons /path/to/icon.png   # アプリのアイコンを作り直す
 swift scripts/make-placeholder-icon.swift server/placeholder-icon.png   # 「仮」のアイコンを作り直す
 ```
