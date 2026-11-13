@@ -39,7 +39,7 @@ AI は下の「AI 向けの導入手順」を読んで作業を進めます。�
 
 この節は、導入を頼まれた AI エージェントに向けた手順です。上から順に実行してください。
 
-1. **前提を確認する**: macOS であること、`node --version` が 24 以上であること、`pnpm --version` で pnpm が使えることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。依存パッケージはないので、`pnpm install` は不要です。
+1. **前提を確認する**: macOS であること、`node --version` が 24 以上であること、`pnpm --version` で pnpm が使えることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。配信するアプリのビルド（`pnpm install` と `pnpm build`）は、手順 6 の `scripts/install-agent.sh` が行います。
 2. **リポジトリを置く**: `git clone https://github.com/whiteleaf7/unicobook.git` で取得します。置き場所はユーザーに確認してください。launchd にはこの場所のパスを登録するため、導入後にリポジトリを移動するとサーバーが起動しなくなります。
 3. **小説フォルダを決める**: 配信する小説フォルダのパスをユーザーに尋ねます（例: iCloud Drive の `~/Library/Mobile Documents/com~apple~CloudDocs/novels`）。フォルダの構成は「[小説フォルダの置き方](#小説フォルダの置き方)」を参照してください。
 4. **設定ファイルを作る**: `cp .env.example .env` を実行し、`.env` の `UNICOBOOK_ROOT` を手順 3 のパスに書き換えます。ほかの項目は「[設定](#設定)」の表のとおり既定値のままで構いません。
@@ -74,14 +74,14 @@ iPhone（Safari / ホーム画面の PWA）
 tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説フォルダ（UNICOBOOK_ROOT）
 ```
 
-- `server/server.ts`: 小説フォルダと PWA を配信する Node.js のサーバーです（依存パッケージなし）。`127.0.0.1` だけで待ち受け、外からは `tailscale serve` を経由してアクセスします。ほかのサイトからのリクエストは、Host・Origin・Sec-Fetch-Site を見て拒否します（`guard.ts`）。
+- `server/server.ts`: 小説フォルダと PWA を配信する Node.js のサーバーです。`127.0.0.1` だけで待ち受け、外からは `tailscale serve` を経由してアクセスします。ほかのサイトからのリクエストは、Host・Origin・Sec-Fetch-Site を見て拒否します（`guard.ts`）。
   - `config.ts`: 環境変数や `.env` から設定を読みます。
   - `user-store.ts`: 読書位置・印・付箋などのユーザーデータを SQLite に保存します。
   - `icons.ts`: フォルダのアイコンを選んだり、Gemini で作ったりします。
   - `summary.ts`: 設定資料から、Gemini であらすじと登場人物の一覧を作ります。
   - `agy.ts`: Gemini を呼ぶ Antigravity の CLI を動かします。
   - `images.ts`: 大きな画像を縮小して返します。
-- `public/`: PWA の本体です（ビルド不要）。
+- `public/`: PWA の本体です。`pnpm build`（`scripts/build.ts`）で `dist/` にまとめて圧縮したものを配信します。開発モードでは、ビルドせずに `public/` をそのまま配信します（「[開発](#開発)」を参照）。
   - `app.js`: ファイラー・メニュー・各シートなど、画面全体を組み立てます。
   - `aozora.js`: 青空文庫記法を解析します。
   - `reader.js`: 縦書きのページを表示し、読書位置を保存・復元します。
@@ -123,9 +123,11 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
 
 ```sh
 cp .env.example .env                # 配信するフォルダ（UNICOBOOK_ROOT）などを書き換える
-scripts/install-agent.sh            # launchd に登録する（ログイン時に自動で起動する）
+scripts/install-agent.sh            # アプリをビルドし、launchd に登録する（ログイン時に自動で起動する）
 tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開する
 ```
+
+- `scripts/install-agent.sh` は、`pnpm install` と `pnpm build` で、配信するアプリを `dist/` に作ってから登録します。
 
 - 配信するフォルダは、`.env` の `UNICOBOOK_ROOT` で指定します。`scripts/install-agent.sh "/path/to/dir"` のように、引数で指定することもできます。
 - 小説フォルダが iCloud Drive にある場合、初回に macOS が node に iCloud Drive へのアクセス許可を求めます。許可しないと、フォルダの一覧を読めません。
@@ -148,6 +150,7 @@ tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開する
 | `UNICOBOOK_AGY`           | `~/.local/bin/agy`                        | Gemini でアイコンやあらすじを作るときに使う Antigravity の CLI                         |
 | `UNICOBOOK_AGY_MODEL`     | `gemini-3.8-flash-medium`                 | そのときに使うモデル                                                                   |
 | `UNICOBOOK_AGY_BRAIN_DIR` | `~/.gemini/antigravity-cli/brain`         | Antigravity の CLI が会話ごとのファイルを置く場所                                      |
+| `UNICOBOOK_DEV`           | なし                                      | `1` にすると開発モードになり、`dist/` ではなく `public/` をそのまま配信します          |
 
 Gemini を使う機能（アイコン作りとあらすじ）を使うには、Mac で `agy` にログインしておく必要があります。使わない場合は設定しなくて構いません。なお、アイコンは 1 枚あたり 2〜3 分かかります。
 
@@ -156,6 +159,13 @@ Gemini を使う機能（アイコン作りとあらすじ）を使うには、M
 `server/` や `.env` を変更したときや、nodenv で node を入れ替えたときは、常駐しているサーバーを再起動してください。
 
 ```sh
+launchctl kickstart -k gui/$(id -u)/local.unicobook
+```
+
+`git pull` で新しい版に更新したときは、アプリをビルドし直してから再起動してください。
+
+```sh
+pnpm install && pnpm build
 launchctl kickstart -k gui/$(id -u)/local.unicobook
 ```
 
@@ -224,11 +234,17 @@ launchctl kickstart -k gui/$(id -u)/local.unicobook
 
 ## 開発
 
-動かすだけなら依存パッケージは要りませんが、整形（Biome）とリント（oxlint）を使うときは、先に `pnpm install` を実行してください。
+開発するときは、開発モードでサーバーを動かします。開発モードでは `public/` をビルドせずにそのまま配信するので、ファイルを保存してページを読み直せば変更が反映されます。
+
+- その場で起動するときは `pnpm dev` を使います。
+- 常駐しているサーバーを開発モードにするときは、`.env` に `UNICOBOOK_DEV=1` を書いて、サーバーを再起動します。
+- 配る形で確かめるときは、`pnpm build` で `dist/` を作ってから、開発モードを外して `pnpm start` で起動します。
 
 ```sh
-pnpm install  # 整形とリントの道具を入れる（開発するときだけ）
-pnpm start    # サーバーを起動する（設定は .env）
+pnpm install  # ビルド・整形・リントの道具を入れる
+pnpm dev      # 開発モードでサーバーを起動する（public/ をそのまま配信する）
+pnpm build    # 配信するアプリを dist/ に作る
+pnpm start    # サーバーを起動する（dist/ を配信する。設定は .env）
 pnpm test     # テストを実行する
 pnpm format   # 整形する
 pnpm lint     # リントと型チェックをする

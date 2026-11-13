@@ -2,22 +2,29 @@
 // サーバーは ETag を返すので、変更がなければ 304 で済み、通信量は小さい。
 
 const CACHE = "unicobook-v1";
+// app.js が読み込むモジュール。ビルドした版（dist/）では app.js に 1 ファイルにまとまっているので入れない。
+// ビルドのときに globalThis.UNICOBOOK_BUNDLED が true に置き換わる（scripts/build.ts）
+const MODULES = globalThis.UNICOBOOK_BUNDLED
+	? []
+	: [
+			"reader.js",
+			"aozora.js",
+			"store.js",
+			"api.js",
+			"viewer.js",
+			"presets.js",
+			"diff.js",
+			"dom.js",
+			"long-press.js",
+			"markdown.js",
+		];
 // 最初に入れておくファイル。倫明朝（fonts/）は大きいので入れず、表示設定で選んで初めて使われたときに取得してキャッシュする
 const SHELL = [
 	"./",
 	"index.html",
 	"style.css",
 	"app.js",
-	"reader.js",
-	"aozora.js",
-	"store.js",
-	"api.js",
-	"viewer.js",
-	"presets.js",
-	"diff.js",
-	"dom.js",
-	"long-press.js",
-	"markdown.js",
+	...MODULES,
 	"manifest.webmanifest",
 	"icons/icon-180.png",
 	"icons/icon-192.png",

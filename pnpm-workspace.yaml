@@ -1,0 +1,3 @@
+# esbuild の本体は機種ごとのパッケージから入るので、インストール後のスクリプトは動かさない
+allowBuilds:
+  esbuild: false

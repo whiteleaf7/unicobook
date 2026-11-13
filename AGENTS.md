@@ -5,9 +5,11 @@
 ## 構成と前提
 
 - `server/`: サーバー。TypeScript を、Node.js 24 の型の除去でそのまま動かす（ビルドしない）。`tsconfig.json` は `erasableSyntaxOnly` なので、`enum`・`namespace`・コンストラクタ引数のプロパティなど、型を消すだけでは動かない構文は使わない。import には `.ts` の拡張子を付ける。
-- `public/`: PWA の本体。ビルドしない素の JavaScript（ES modules）。`public/aozora.js` はサーバーからも import している。
+- `public/`: PWA の本体。素の JavaScript（ES modules）で書く。`public/aozora.js` はサーバーからも import している。
+- `scripts/build.ts`: `pnpm build` で、`public/` を esbuild で `dist/` にまとめる（JavaScript は `app.js` から 1 ファイルに束ねて圧縮し、CSS と `sw.js` も圧縮する）。`dist/` は git 管理外。
+- サーバーはふだん `dist/` を配信し、開発モード（`.env` の `UNICOBOOK_DEV=1`、または `pnpm dev`）では `public/` をビルドせずにそのまま配信する。
 - `test/`: `node --test` で動かすテスト。
-- 実行時の依存パッケージは入れず、Node.js の標準モジュールとブラウザの標準機能だけで書く。`devDependencies` は整形とリントの道具だけ。
+- 実行時の依存パッケージは入れず、Node.js の標準モジュールとブラウザの標準機能だけで書く。`devDependencies` はビルド・整形・リントの道具だけ。
 - コメントや画面の文言は日本語で書く。
 
 ## 安全のために守ること
@@ -22,7 +24,8 @@
 
 ## Service Worker
 
-- 画面を開くのに要るファイルを `public/` に足したときは、`public/sw.js` の `SHELL` にも足す。
+- 画面を開くのに要るファイルを `public/` に足したときは、`public/sw.js` の `SHELL` にも足す。`app.js` が import するモジュールは `MODULES` に足す（ビルドした版では `app.js` にまとまるので、`MODULES` は空になる）。
+- そのまま写すファイルやフォルダ（`index.html` から参照する画像など）を足したときは、`scripts/build.ts` の `COPIED` にも足す。
 - `SHELL` のファイルを消したり名前を変えたりしたときは、`CACHE` の版を上げる（端末に残った古いキャッシュを消すため）。
 
 ## ルール
@@ -44,6 +47,14 @@ pnpm test
 ```
 
 npm は使わず、pnpm を使うこと。
+
+### ビルドの確認
+
+`public/` や `scripts/build.ts` を変更したら、`pnpm build` が通ることを確認すること。常駐しているサーバーが開発モードでない（`dist/` を配信している）場合は、ビルドし直さないと変更が画面に反映されない。
+
+```bash
+pnpm build
+```
 
 ### 整形とリント
 

@@ -9,7 +9,7 @@ import {
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { decodeText, plainLine, sourceLines } from "../public/aozora.js";
-import { PORT, PUBLIC_DIR, ROOT } from "./config.ts";
+import { DEV_MODE, PORT, PUBLIC_DIR, ROOT } from "./config.ts";
 import {
 	isTextFile,
 	relativeToRoot,
@@ -309,6 +309,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-	console.log(`unicobook: http://127.0.0.1:${PORT}/ (root: ${ROOT})`);
+	console.log(
+		`unicobook: http://127.0.0.1:${PORT}/ (root: ${ROOT}, app: ${DEV_MODE ? "public/（開発モード）" : "dist/"})`,
+	);
 	void cleanNonExistentPositions();
 });

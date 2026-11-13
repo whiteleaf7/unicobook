@@ -1,5 +1,6 @@
 // サーバーの設定。環境変数（またはリポジトリ直下の .env）で変える。.env.example を参照
 import "./env.ts";
+import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -21,7 +22,18 @@ if (!env("UNICOBOOK_ROOT")) {
 // 配信する小説フォルダの実パス（シンボリックリンクをたどったもの）
 export const ROOT = await realpath(envPath("UNICOBOOK_ROOT", ""));
 export const PORT = Number(env("UNICOBOOK_PORT") ?? 8787);
-export const PUBLIC_DIR = path.resolve(import.meta.dirname, "../public");
+// 開発モード（UNICOBOOK_DEV=1）では public/ をビルドせずにそのまま配信し、ふだんは pnpm build で作った dist/ を配信する
+export const DEV_MODE = env("UNICOBOOK_DEV") === "1";
+export const PUBLIC_DIR = path.resolve(
+	import.meta.dirname,
+	DEV_MODE ? "../public" : "../dist",
+);
+if (!existsSync(path.join(PUBLIC_DIR, "index.html"))) {
+	console.error(
+		"dist/ がありません。pnpm install と pnpm build を実行してください（開発するときは UNICOBOOK_DEV=1 で public/ を配信できます）",
+	);
+	process.exit(1);
+}
 // 縮小した画像や、Gemini でアイコンを作るときの作業ファイルを置く場所
 export const IMAGE_CACHE_DIR = envPath(
 	"UNICOBOOK_CACHE_DIR",

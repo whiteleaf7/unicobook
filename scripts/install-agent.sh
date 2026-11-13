@@ -43,6 +43,12 @@ if [[ ! -d "$ROOT" ]]; then
   exit 1
 fi
 
+# サーバーは pnpm build で作った dist/ を配信する。開発モード（UNICOBOOK_DEV=1）なら public/ をそのまま配信するので作らない
+DEV="${UNICOBOOK_DEV:-$(cd "$REPO" && "$NODE" --env-file-if-exists=.env -p 'process.env.UNICOBOOK_DEV?.trim() ?? ""')}"
+if [[ "$DEV" != "1" ]]; then
+  (cd "$REPO" && pnpm install --frozen-lockfile && pnpm build)
+fi
+
 xml_escape() {
   local s="$1"
   s="${s//&/&amp;}"; s="${s//</&lt;}"; s="${s//>/&gt;}"
