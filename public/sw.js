@@ -2,6 +2,7 @@
 // サーバーは ETag を返すので、変更がなければ 304 で済み、通信量は小さい。
 
 const CACHE = "unicobook-v1";
+// 最初に入れておくファイル。倫明朝（fonts/）は大きいので入れず、表示設定で選んで初めて使われたときに取得してキャッシュする
 const SHELL = [
 	"./",
 	"index.html",
@@ -18,8 +19,6 @@ const SHELL = [
 	"long-press.js",
 	"markdown.js",
 	"manifest.webmanifest",
-	"fonts/RinMincho-Regular.woff2",
-	"fonts/RinMincho-Bold.woff2",
 	"icons/icon-180.png",
 	"icons/icon-192.png",
 	"icons/icon-512.png",
