@@ -75,8 +75,15 @@ iPhone（Safari / ホーム画面の PWA）
 tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説フォルダ（UNICOBOOK_ROOT）
 ```
 
-- `server/server.ts`: 小説フォルダと PWA を配信する Node.js のサーバーです（依存パッケージなし）。`127.0.0.1` だけで待ち受け、外からは `tailscale serve` を経由してアクセスします。ほかのサイトからのリクエストは、Host・Origin・Sec-Fetch-Site を見て拒否します。
+- `server/server.ts`: 小説フォルダと PWA を配信する Node.js のサーバーです（依存パッケージなし）。`127.0.0.1` だけで待ち受け、外からは `tailscale serve` を経由してアクセスします。ほかのサイトからのリクエストは、Host・Origin・Sec-Fetch-Site を見て拒否します（`guard.ts`）。
+  - `config.ts`: 環境変数や `.env` から設定を読みます。
+  - `user-store.ts`: 読書位置・印・付箋などのユーザーデータを SQLite に保存します。
+  - `icons.ts`: フォルダのアイコンを選んだり、Gemini で作ったりします。
+  - `summary.ts`: 設定資料から、Gemini であらすじと登場人物の一覧を作ります。
+  - `agy.ts`: Gemini を呼ぶ Antigravity の CLI を動かします。
+  - `images.ts`: 大きな画像を縮小して返します。
 - `public/`: PWA の本体です（ビルド不要）。
+  - `app.js`: ファイラー・メニュー・各シートなど、画面全体を組み立てます。
   - `aozora.js`: 青空文庫記法を解析します。
   - `reader.js`: 縦書きのページを表示し、読書位置を保存・復元します。
   - `store.js`: 設定・読書位置・印などを保存し、サーバーと同期します。

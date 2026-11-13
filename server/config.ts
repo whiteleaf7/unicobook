@@ -1,0 +1,38 @@
+// サーバーの設定。環境変数（またはリポジトリ直下の .env）で変える。.env.example を参照
+import './env.ts';
+import { realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
+
+const env = (name: string) => process.env[name]?.trim() || undefined;
+// ~ で始まるパスは、ホームディレクトリからのパスとして扱う
+const expandHome = (p: string) => (p === '~' || p.startsWith('~/') ? path.join(homedir(), p.slice(1)) : p);
+const envPath = (name: string, fallback: string) => path.resolve(expandHome(env(name) ?? fallback));
+
+if (!env('UNICOBOOK_ROOT')) {
+  console.error('UNICOBOOK_ROOT に配信する小説フォルダを指定してください（.env.example を参照）');
+  process.exit(1);
+}
+
+// 配信する小説フォルダの実パス（シンボリックリンクをたどったもの）
+export const ROOT = await realpath(envPath('UNICOBOOK_ROOT', ''));
+export const PORT = Number(env('UNICOBOOK_PORT') ?? 8787);
+export const PUBLIC_DIR = path.resolve(import.meta.dirname, '../public');
+// 縮小した画像や、Gemini でアイコンを作るときの作業ファイルを置く場所
+export const IMAGE_CACHE_DIR = envPath('UNICOBOOK_CACHE_DIR', '~/Library/Caches/unicobook');
+
+// サーバーが持つユーザーデータの置き場所。小説フォルダには書き込まないよう、ここに保存する
+const DATA_DIR = envPath('UNICOBOOK_DATA_DIR', '~/Library/Application Support/unicobook');
+// アプリで選んだフォルダのアイコン（プリセットと、画像より優先するか）
+export const PRESETS_FILE = path.join(DATA_DIR, 'icons.json');
+// 設定・読書位置・お気に入りなど、ブラウザ間で共有するユーザーデータ
+export const STORE_DB_FILE = path.join(DATA_DIR, 'store.db');
+
+// フォルダのアイコンやあらすじを作る Antigravity の CLI（サブスクの Gemini を使う）。
+// launchd は PATH を読まないので実体のパスで呼ぶ
+export const AGY = envPath('UNICOBOOK_AGY', '~/.local/bin/agy');
+export const AGY_MODEL = env('UNICOBOOK_AGY_MODEL') ?? 'gemini-3.8-flash-medium';
+// agy を動かす作業フォルダ
+export const AGY_WORK_DIR = path.join(IMAGE_CACHE_DIR, 'generated');
+// agy が会話ごとに作ったファイルを置く場所。Gemini が作った画像もここ（brain/<会話 ID>/）に置かれる
+export const AGY_BRAIN_DIR = envPath('UNICOBOOK_AGY_BRAIN_DIR', '~/.gemini/antigravity-cli/brain');
