@@ -1,11 +1,12 @@
-import { Reader } from './reader.js';
+import { Reader, BASELINE_MISSING } from './reader.js';
 import { openViewer, closeViewer, isViewerOpen } from './viewer.js';
 import { fetchList, fetchRecentlyUpdated, fetchTexts, searchAll, dirname, basename, largeImageUrl, iconUrl, saveIconSetting, generateIcon, fetchSummary, generateSummary } from './api.js';
 import { PRESET_GROUPS, hasPreset, presetIcon } from './presets.js';
 import { diffChars } from './diff.js';
+import { $, h } from './dom.js';
+import { attachLongPress } from './long-press.js';
+import { renderMarkdown } from './markdown.js';
 import * as store from './store.js';
-
-const $ = (sel, root = document) => root.querySelector(sel);
 
 const filerEl = $('#filer');
 const readerEl = $('#reader');
@@ -14,12 +15,13 @@ const sheetEl = $('#sheet');
 const toastEl = $('#toast');
 const dialogEl = $('#dialog');
 const slider = $('.slider', menuEl);
+const listEl = $('.list', filerEl);
 
 let settings = store.loadSettings();
+// リーダーで開いているファイル。ファイラーを出している間は null
 let currentFile = null;
-// フォルダごとの一覧のスクロール位置（リーダーから戻ったときに元の場所を表示するため）
-const scrollPositions = new Map();
 
+// めくって前後の話へ移ったときに、次に開く話をどこから見せるか（'first' か 'last'）
 let pendingInitialPage = null;
 
 const reader = new Reader(readerEl, {
@@ -35,6 +37,7 @@ const reader = new Reader(readerEl, {
   onDiffDetail: (hunk, hunks, index) => openDiffSheet(hunk, hunks, index),
   onNoteOpen: (line, noteId) => openNotesSheet(line, noteId),
 });
+// ブラウザの開発者ツールから確かめるための入口
 window.__openDiffSheet = openDiffSheet;
 window.__reader = reader;
 
@@ -48,21 +51,6 @@ document.addEventListener('touchstart', (e) => {
   if (!e.target.closest('#reader, #viewer') || e.target.closest('a, button')) return;
   e.preventDefault();
 }, { passive: false });
-
-function h(tag, attrs = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v == null) continue;
-    if (k === 'class') el.className = v;
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (typeof v === 'boolean') {
-      if (v) el.setAttribute(k, '');
-      if (k in el) el[k] = v;
-    } else el.setAttribute(k, v);
-  }
-  el.append(...children.flat().filter((c) => c != null));
-  return el;
-}
 
 const dirRoute = (path) => `#/d/${encodeURIComponent(path)}`;
 const fileRoute = (path) => `#/r/${encodeURIComponent(path)}`;
@@ -99,17 +87,16 @@ const MARKS = {
   favorite: { label: 'お気に入り', icon: 'heart' },
 };
 const markedRoute = (kind) => `#/m/${kind}`;
-// アプリの名前。パンくずのルートに使う
-let rootName = 'ユニコブック';
+const APP_NAME = 'ユニコブック';
 
 const HOME_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11 12 4l8.5 7M6 9v10.5h4.5V14h3v5.5H18V9" /></svg>';
-const UNICO_ICON_HTML = '<img class="unico-icon" src="icons/icon-192.png" alt="ユニコブック" />';
+const UNICO_ICON_HTML = `<img class="unico-icon" src="icons/icon-192.png" alt="${APP_NAME}" />`;
 
 function updateHomeButton(isTop) {
   const btn = $('.home', filerEl);
   if (!btn) return;
   btn.classList.toggle('is-top', isTop);
-  btn.setAttribute('aria-label', isTop ? 'ユニコブック' : 'トップのフォルダへ');
+  btn.setAttribute('aria-label', isTop ? APP_NAME : 'トップのフォルダへ');
   btn.innerHTML = isTop ? UNICO_ICON_HTML : HOME_SVG;
 }
 
@@ -156,6 +143,11 @@ function toast(message) {
   toastTimer = setTimeout(() => (toastEl.hidden = true), 2500);
 }
 
+// サーバーにつながらず、Service Worker が保存しておいたもの（what）を返したときに知らせる
+function toastIfCached(data, what) {
+  if (data?.fromCache) toast(`つながらないため、保存済みの${what}を表示しています`);
+}
+
 // ステータスバーの色も背景色に合わせる
 function applyTheme() {
   if (settings.theme === 'auto') settings.theme = 'light';
@@ -195,34 +187,81 @@ function progressText(pos) {
 
 // ルーティング
 
+// URL のハッシュを、開く画面にする。リーダーなら { type: 'reader', path }、それ以外は一覧の画面（view）
+function parseRoute(hash) {
+  const decoded = (m, i) => decodeURIComponent(m?.[i] ?? '');
+  if (hash === UPDATED_ROUTE) return { type: 'updated' };
+  if (hash === HISTORY_ROUTE) return { type: 'history' };
+  const file = hash.match(/^#\/r\/(.*)$/);
+  if (file) return { type: 'reader', path: decoded(file, 1) };
+  const seriesSearch = hash.match(/^#\/search-in\/([^/]+)(?:\/(.*))?$/);
+  if (seriesSearch) return { type: 'search', query: decoded(seriesSearch, 2), series: decoded(seriesSearch, 1) };
+  if (hash.startsWith('#/search')) return { type: 'search', query: decoded(hash.match(/^#\/search\/(.*)$/), 1), series: null };
+  const marked = hash.match(/^#\/m\/(\w+)$/);
+  if (marked && MARKS[marked[1]]) return { type: 'marked', kind: marked[1] };
+  return { type: 'folder', path: decoded(hash.match(/^#\/d\/(.*)$/), 1) };
+}
+
 function route() {
   const hash = location.hash || dirRoute('');
   store.setLastRoute(hash);
-  const file = hash.match(/^#\/r\/(.*)$/);
-  const marked = hash.match(/^#\/m\/(\w+)$/);
-  const seriesSearch = hash.match(/^#\/search-in\/([^/]+)(?:\/(.*))?$/);
-  if (file) openReader(decodeURIComponent(file[1]));
-  else if (hash === UPDATED_ROUTE) openUpdated();
-  else if (hash === HISTORY_ROUTE) openHistory();
-  else if (seriesSearch) openSearch(decodeURIComponent(seriesSearch[2] ?? ''), decodeURIComponent(seriesSearch[1]));
-  else if (hash.startsWith('#/search')) openSearch(decodeURIComponent(hash.match(/^#\/search\/(.*)$/)?.[1] ?? ''));
-  else if (marked && MARKS[marked[1]]) openMarked(marked[1]);
-  else openFiler(decodeURIComponent(hash.match(/^#\/d\/(.*)$/)?.[1] ?? ''));
+  const target = parseRoute(hash);
+  if (target.type === 'reader') openReader(target.path);
+  else openView(target);
 }
 
 // ファイラー
 
-// 表示中のフォルダ（印の一覧・最近の更新のときは null）と、スクロール位置を覚えるためのキー
-let filerPath = null;
-let markedKind = null;
-let showingUpdated = false;
-let showingHistory = false;
-let searchQuery = null;
-// シリーズの中だけを検索しているときのシリーズ名（searchQuery が null でないときだけ意味を持つ）
-let searchSeries = null;
-let filerKey = null;
+// ファイラーに出している一覧。リーダーを開いている間は null。
+// - { type: 'folder', path }: フォルダの中身（path が '' ならトップ）
+// - { type: 'marked', kind }: 印の一覧
+// - { type: 'history' }: 開いた履歴
+// - { type: 'updated' }: 最近の更新
+// - { type: 'search', query, series }: 検索（series はシリーズの中だけを探すときのシリーズ名）
+// 読み込みを待つ間に別の一覧へ移ったかは、view が同じオブジェクトのままかで確かめる
+let view = null;
 
-function showFiler(key) {
+function openView(v) {
+  switch (v.type) {
+    case 'marked':
+      return openMarked(v.kind);
+    case 'history':
+      return openHistory();
+    case 'updated':
+      return openUpdated();
+    case 'search':
+      return openSearch(v.query, v.series);
+    default:
+      return openFiler(v.path);
+  }
+}
+
+// 今の一覧を、スクロール位置を保ったまま読み直す
+function refreshFiler() {
+  openView(view ?? { type: 'folder', path: '' });
+}
+
+// 一覧ごとのスクロール位置（リーダーから戻ったときや読み直したときに、元の場所を表示するため）
+const scrollPositions = new Map();
+
+function scrollKey(v) {
+  if (v.type === 'folder') return v.path;
+  if (v.type === 'marked') return `@${v.kind}`;
+  if (v.type === 'search') return `@search:${v.series ?? ''}:${v.query}`;
+  return `@${v.type}`;
+}
+
+function rememberScroll() {
+  if (view) scrollPositions.set(scrollKey(view), window.scrollY);
+}
+
+function restoreScroll() {
+  window.scrollTo(0, scrollPositions.get(scrollKey(view)) ?? 0);
+}
+
+// リーダーなどを閉じて、ファイラーに newView の一覧を出す準備をする。
+// crumbs を渡せばパンくずも描く（フォルダの一覧は中身を読み込んでから描く）
+function showFiler(newView, { title, crumbs = null }) {
   hideMenu();
   closeSheet();
   closeViewer();
@@ -232,10 +271,16 @@ function showFiler(key) {
   }
   readerEl.hidden = true;
   filerEl.hidden = false;
-  $('.sort', filerEl).disabled = false;
-  $('.summary', filerEl).hidden = true;
-  if (filerKey !== null) scrollPositions.set(filerKey, window.scrollY);
-  filerKey = key;
+  rememberScroll();
+  view = newView;
+  const isFolder = newView.type === 'folder';
+  // 並び順はフォルダごとに覚えるので、フォルダの一覧でだけ変えられる
+  $('.sort', filerEl).disabled = !isFolder;
+  // あらすじはシリーズのフォルダの中でだけ出す
+  $('.summary', filerEl).hidden = !(isFolder && newView.path);
+  updateHomeButton(isFolder && !newView.path);
+  document.title = title;
+  if (crumbs) setCrumbs(crumbs);
 }
 
 function setCrumbs(crumbs) {
@@ -248,146 +293,157 @@ function setCrumbs(crumbs) {
   );
 }
 
+// 一覧の行を出し、更新の印を付け、前に見ていたスクロール位置に戻す
+function showRows(rows) {
+  listEl.replaceChildren(...rows);
+  markUpdatedLater(listEl);
+  restoreScroll();
+}
+
 const upRow = (href) =>
   h('div', { class: 'row up' }, h('a', { class: 'main', href }, icon('up'), h('span', { class: 'name' }, '..')));
 
+const emptyRow = (...message) => h('p', { class: 'empty' }, ...message);
+
+const loadFailedRow = (e, message = '読み込めませんでした') => emptyRow(message, h('br'), e.message);
+
 async function openFiler(path) {
-  showFiler(path);
-  filerPath = path;
-  updateHomeButton(!path);
-  $('.summary', filerEl).hidden = !path;
-  markedKind = null;
-  showingUpdated = false;
-  showingHistory = false;
-  searchQuery = null;
-  document.title = path ? basename(path) : 'ユニコブック';
+  const thisView = { type: 'folder', path };
+  showFiler(thisView, { title: path ? basename(path) : APP_NAME });
   try {
     const data = await fetchList(path);
     store.setSeriesIcons(data.seriesIcons);
-    if (filerPath !== path) return;
+    if (view !== thisView) return;
     renderFiler(data);
-    window.scrollTo(0, scrollPositions.get(path) ?? 0);
-    if (data.fromCache) toast('つながらないため、保存済みの一覧を表示しています');
+    toastIfCached(data, '一覧');
   } catch (e) {
-    if (filerPath !== path) return;
-    $('.crumbs', filerEl).replaceChildren(path || 'ユニコブック');
-    $('.list', filerEl).replaceChildren(h('p', { class: 'empty' }, `読み込めませんでした`, h('br'), e.message));
+    if (view !== thisView) return;
+    $('.crumbs', filerEl).replaceChildren(path || APP_NAME);
+    listEl.replaceChildren(loadFailedRow(e));
   }
 }
 
 function renderFiler(data) {
-  const { root, path } = data;
-  rootName = 'ユニコブック';
+  const { path } = data;
   const segments = path ? path.split('/') : [];
   const crumbs = path
     ? segments.map((name, i) => ({ name, href: dirRoute(segments.slice(0, i + 1).join('/')) }))
-    : [{ name: 'ユニコブック', href: dirRoute('') }];
+    : [{ name: APP_NAME, href: dirRoute('') }];
   setCrumbs(crumbs);
-  updateHomeButton(!path);
+
+  const rows = path ? [upRow(dirRoute(dirname(path)))] : topSections(data);
+  rows.push(...folderRows(data));
+  if (!data.dirs.length && !data.files.length) rows.push(emptyRow('このフォルダには表示できるファイルがありません'));
+  showRows(rows);
+}
+
+// トップの一覧の上に出す、続きを読む・各一覧への入口・「一覧」の見出し
+function topSections(data) {
+  const existingPaths = new Set([
+    ...data.files.map((f) => f.name),
+    ...data.dirs.flatMap((d) => (d.texts ?? []).map((t) => (typeof t === 'string' ? t : t.path))),
+  ]);
+
+  // キャッシュからの表示でなければ、存在しないファイルの読書位置を削除する
+  if (!data.fromCache) {
+    const missing = Object.keys(store.getPositions()).filter((p) => !existingPaths.has(p));
+    if (missing.length) store.deletePositions(missing);
+  }
 
   const rows = [];
-  if (!path) {
-    const existingPaths = new Set([
-      ...data.files.map((f) => f.name),
-      ...data.dirs.flatMap((d) => (d.texts ?? []).map((t) => (typeof t === 'string' ? t : t.path))),
-    ]);
-
-    // キャッシュからの表示でなければ、存在しないファイルの読書位置を削除する
-    if (!data.fromCache) {
-      const missing = Object.keys(store.getPositions()).filter((p) => !existingPaths.has(p));
-      if (missing.length) store.deletePositions(missing);
-    }
-
-    // 削除されたファイルを除き、1 件多く取り、続きがあれば履歴の一覧への入口を出す
-    const validRecent = store.getRecent().filter((r) => existingPaths.has(r.path));
-    const recent = validRecent.slice(0, RECENT_COUNT + 1);
-    if (recent.length) {
-      rows.push(
-        h(
-          'div',
-          { class: 'section-head' },
-          h('h2', { class: 'section-label' }, '続きを読む'),
-          recent.length > RECENT_COUNT ? h('a', { class: 'more', href: HISTORY_ROUTE }, 'もっと表示') : null,
-        ),
-      );
-      // どの作品かわかるよう、シリーズ名（小説フォルダ直下のフォルダ名）を添える
-      rows.push(...recent.slice(0, RECENT_COUNT).map((r) => fileRow(r.path, { label: seriesOf(r.path), recent: true, withSeriesIcon: true })));
-    }
-    // 後で読む・お気に入り・最近の更新の一覧への入口は、縦幅を取らないよう 1 行に並べる
-    const shortcut = (href, iconName, label, count) =>
-      h('a', { class: 'shortcut', href }, icon(iconName), h('span', { class: 'label' }, label), count == null ? null : h('span', { class: 'count' }, String(count)));
+  // 削除されたファイルを除き、1 件多く取り、続きがあれば履歴の一覧への入口を出す
+  const recent = store
+    .getRecent()
+    .filter((r) => existingPaths.has(r.path))
+    .slice(0, RECENT_COUNT + 1);
+  if (recent.length) {
     rows.push(
       h(
-        'nav',
-        { class: 'shortcuts' },
-        Object.entries(MARKS).map(([kind, { label, icon: iconName }]) =>
-          shortcut(markedRoute(kind), iconName, label, store.getMarked(kind).length),
-        ),
-        shortcut(UPDATED_ROUTE, 'clock', '最近の更新'),
+        'div',
+        { class: 'section-head' },
+        h('h2', { class: 'section-label' }, '続きを読む'),
+        recent.length > RECENT_COUNT ? h('a', { class: 'more', href: HISTORY_ROUTE }, 'もっと表示') : null,
       ),
     );
-    rows.push(h('h2', { class: 'section-label' }, '一覧'));
-  } else {
-    rows.push(upRow(dirRoute(dirname(path))));
+    // どの作品かわかるよう、シリーズ名（小説フォルダ直下のフォルダ名）を添える
+    rows.push(...recent.slice(0, RECENT_COUNT).map((r) => fileRow(r.path, { label: seriesOf(r.path), recent: true, withSeriesIcon: true })));
   }
+  // 後で読む・お気に入り・最近の更新の一覧への入口は、縦幅を取らないよう 1 行に並べる
+  const shortcut = (href, iconName, label, count) =>
+    h('a', { class: 'shortcut', href }, icon(iconName), h('span', { class: 'label' }, label), count == null ? null : h('span', { class: 'count' }, String(count)));
+  rows.push(
+    h(
+      'nav',
+      { class: 'shortcuts' },
+      Object.entries(MARKS).map(([kind, { label, icon: iconName }]) => shortcut(markedRoute(kind), iconName, label, store.getMarked(kind).length)),
+      shortcut(UPDATED_ROUTE, 'clock', '最近の更新'),
+    ),
+  );
+  rows.push(h('h2', { class: 'section-label' }, '一覧'));
+  return rows;
+}
 
-  const sortMode = store.getFolderSort(path ?? '');
+// フォルダの中のフォルダとファイルの行。ピン留めしたものを上に、それぞれフォルダ・ファイルの順に並べる
+function folderRows(data) {
+  const { path } = data;
+  const compare = folderItemComparator(store.getFolderSort(path ?? ''));
   const pins = store.getPins();
-  const isPinned = (p) => p in pins;
-
-  const compareItems = (a, b) => {
-    if (sortMode === 'name-desc') return b.name.localeCompare(a.name, 'ja', { numeric: true });
-    if (sortMode === 'mtime-desc') return (b.mtime ?? 0) - (a.mtime ?? 0) || a.name.localeCompare(b.name, 'ja', { numeric: true });
-    if (sortMode === 'mtime-asc') return (a.mtime ?? 0) - (b.mtime ?? 0) || a.name.localeCompare(b.name, 'ja', { numeric: true });
-    if (sortMode === 'progress') {
-      const finA = isFinished(store.getPosition(a.path)) ? 1 : 0;
-      const finB = isFinished(store.getPosition(b.path)) ? 1 : 0;
-      if (finA !== finB) return finA - finB;
-      return a.name.localeCompare(b.name, 'ja', { numeric: true });
-    }
-    return a.name.localeCompare(b.name, 'ja', { numeric: true });
-  };
-
-  const dirItems = data.dirs.map((d) => {
-    const p = childPath(path, d.name);
-    const mtime = d.texts?.length ? Math.max(...d.texts.map((t) => t.mtime ?? 0)) : 0;
-    return { type: 'dir', d, path: p, name: d.name, mtime, pinned: isPinned(p) };
+  const items = [
+    ...data.dirs.map((d) => {
+      const p = childPath(path, d.name);
+      const mtime = d.texts?.length ? Math.max(...d.texts.map((t) => t.mtime ?? 0)) : 0;
+      return { name: d.name, path: p, mtime, isDir: true, info: d };
+    }),
+    ...data.files.map((f) => ({ name: f.name, path: childPath(path, f.name), mtime: f.mtime, isDir: false, info: f })),
+  ];
+  const rowOf = (item, pinned) =>
+    item.isDir
+      ? dirRow(item.path, { iconInfo: item.info.icon, texts: item.info.texts, pinned })
+      : fileRow(item.path, { mtime: item.info.mtime, pinned });
+  const sorted = (list) => [...list].sort(compare);
+  return [true, false].flatMap((pinned) => {
+    const group = items.filter((item) => (item.path in pins) === pinned);
+    const dirs = sorted(group.filter((item) => item.isDir));
+    const files = sorted(group.filter((item) => !item.isDir));
+    return [...dirs, ...files].map((item) => rowOf(item, pinned));
   });
+}
 
-  const fileItems = data.files.map((f) => {
-    const p = childPath(path, f.name);
-    return { type: 'file', f, path: p, name: f.name, mtime: f.mtime, pinned: isPinned(p) };
-  });
-
-  // ピン留めされた項目（フォルダソート順に従って上部に固定表示）
-  const pinnedDirs = dirItems.filter((i) => i.pinned).sort(compareItems);
-  const pinnedFiles = fileItems.filter((i) => i.pinned).sort(compareItems);
-
-  // 通常の項目
-  const normalDirs = dirItems.filter((i) => !i.pinned).sort(compareItems);
-  const normalFiles = fileItems.filter((i) => !i.pinned).sort(compareItems);
-
-  for (const item of pinnedDirs) {
-    rows.push(dirRow(item.path, { iconInfo: item.d.icon, texts: item.d.texts, pinned: true }));
+// 一覧の並び順（store.getFolderSort の値）で、2 つの項目 { name, path, mtime } を比べる関数
+function folderItemComparator(sortMode) {
+  const byName = (a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true });
+  const finished = (item) => (isFinished(store.getPosition(item.path)) ? 1 : 0);
+  switch (sortMode) {
+    case 'name-desc':
+      return (a, b) => byName(b, a);
+    case 'mtime-desc':
+      return (a, b) => (b.mtime ?? 0) - (a.mtime ?? 0) || byName(a, b);
+    case 'mtime-asc':
+      return (a, b) => (a.mtime ?? 0) - (b.mtime ?? 0) || byName(a, b);
+    // 読み終えていないものを先に
+    case 'progress':
+      return (a, b) => finished(a) - finished(b) || byName(a, b);
+    default:
+      return byName;
   }
-  for (const item of pinnedFiles) {
-    rows.push(fileRow(item.path, { mtime: item.f.mtime, pinned: true }));
-  }
-  for (const item of normalDirs) {
-    rows.push(dirRow(item.path, { iconInfo: item.d.icon, texts: item.d.texts, pinned: false }));
-  }
-  for (const item of normalFiles) {
-    rows.push(fileRow(item.path, { mtime: item.f.mtime, pinned: false }));
-  }
-  if (!data.dirs.length && !data.files.length) {
-    rows.push(h('p', { class: 'empty' }, 'このフォルダには表示できるファイルがありません'));
-  }
-  $('.list', filerEl).replaceChildren(...rows);
-  markUpdatedLater($('.list', filerEl));
 }
 
 // シリーズ名は小説フォルダ直下のフォルダ名。直下のファイルにはない
 const seriesOf = (path) => (path.includes('/') ? path.split('/')[0] : null);
+
+// フォルダを横断する一覧で、どこにあるかを示すラベル（「シリーズ / 章」）。小説フォルダ直下なら null
+const folderLabel = (path) => (path.includes('/') ? dirname(path).split('/').join(' / ') : null);
+
+// 履歴・最近の更新の行のラベル。シリーズ名と日付
+const seriesAndDate = (path, time) => [seriesOf(path), shortDate(time)].filter(Boolean).join('　');
+
+// 「MM/DD」。今年でなければ「YY/MM/DD」
+function shortDate(time) {
+  const d = new Date(time);
+  const pad = (n) => String(n).padStart(2, '0');
+  const md = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  return d.getFullYear() < new Date().getFullYear() ? `${pad(d.getFullYear() % 100)}/${md}` : md;
+}
 
 // label はタイトルの上に小さく出す、どこにある作品かの説明（シリーズ名や親フォルダ）
 function nameWithLabel(name, label) {
@@ -584,91 +640,52 @@ function markButtons(path) {
 // 印の一覧。フォルダに関係なく、印を付けた日時が新しい順に並べる。
 // 一覧の中で印を外しても、押し間違えたときに戻せるよう、開き直すまでは消さない
 function openMarked(kind) {
-  showFiler(`@${kind}`);
-  $('.sort', filerEl).disabled = true;
-  filerPath = null;
-  markedKind = kind;
-  showingUpdated = false;
-  showingHistory = false;
-  searchQuery = null;
   const { label } = MARKS[kind];
-  document.title = label;
-  setCrumbs([{ name: label }]);
-  updateHomeButton(false);
+  showFiler({ type: 'marked', kind }, { title: label, crumbs: [{ name: label }] });
   const items = store.getMarked(kind);
-  const parentLabel = (path) => (path.includes('/') ? dirname(path).split('/').join(' / ') : null);
   const rows = [upRow(dirRoute(''))];
   for (const { path } of items) {
-    const label = parentLabel(path);
+    const label = folderLabel(path);
     rows.push(
       path.toLowerCase().endsWith('.txt')
         ? fileRow(path, { label, withSeriesIcon: true })
         : dirRow(path, { label, iconInfo: path.includes('/') ? null : store.getSeriesIcons()[path], withSeriesIcon: true }),
     );
   }
-  if (!items.length) rows.push(h('p', { class: 'empty' }, `${label}はまだありません`));
-  $('.list', filerEl).replaceChildren(...rows);
-  markUpdatedLater($('.list', filerEl));
-  window.scrollTo(0, scrollPositions.get(filerKey) ?? 0);
+  if (!items.length) rows.push(emptyRow(`${label}はまだありません`));
+  showRows(rows);
 }
 
 // 開いた履歴。最後に開いた順に最大 HISTORY_COUNT 件で、開いた日も添える
 function openHistory() {
-  showFiler('@history');
-  $('.sort', filerEl).disabled = true;
-  filerPath = null;
-  markedKind = null;
-  showingUpdated = false;
-  showingHistory = true;
-  searchQuery = null;
-  document.title = '履歴';
-  setCrumbs([{ name: '履歴' }]);
-  updateHomeButton(false);
+  showFiler({ type: 'history' }, { title: '履歴', crumbs: [{ name: '履歴' }] });
+  const recent = store.getRecent(HISTORY_COUNT);
   const rows = [upRow(dirRoute(''))];
-  for (const { path, pos } of store.getRecent(HISTORY_COUNT)) {
-    rows.push(fileRow(path, { label: [seriesOf(path), updatedText(pos.updatedAt)].filter(Boolean).join('　'), withSeriesIcon: true }));
+  for (const { path, pos } of recent) {
+    rows.push(fileRow(path, { label: seriesAndDate(path, pos.updatedAt), withSeriesIcon: true }));
   }
-  if (rows.length === 1) rows.push(h('p', { class: 'empty' }, 'まだ何も開いていません'));
-  $('.list', filerEl).replaceChildren(...rows);
-  markUpdatedLater($('.list', filerEl));
-  window.scrollTo(0, scrollPositions.get(filerKey) ?? 0);
-}
-
-function updatedText(mtime) {
-  const d = new Date(mtime);
-  const pad = (n) => String(n).padStart(2, '0');
-  const md = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
-  return d.getFullYear() < new Date().getFullYear() ? `${pad(d.getFullYear() % 100)}/${md}` : md;
+  if (!recent.length) rows.push(emptyRow('まだ何も開いていません'));
+  showRows(rows);
 }
 
 // フォルダを横断して、更新日時が新しい順に最大 UPDATED_COUNT 件。並び順の根拠がわかるよう更新日も添える
 async function openUpdated() {
-  showFiler('@updated');
-  $('.sort', filerEl).disabled = true;
-  filerPath = null;
-  markedKind = null;
-  showingUpdated = true;
-  showingHistory = false;
-  searchQuery = null;
-  document.title = '最近の更新';
-  setCrumbs([{ name: '最近の更新' }]);
-  updateHomeButton(false);
+  const thisView = { type: 'updated' };
+  showFiler(thisView, { title: '最近の更新', crumbs: [{ name: '最近の更新' }] });
   try {
     const data = await fetchRecentlyUpdated(UPDATED_COUNT);
     store.setSeriesIcons(data.seriesIcons);
-    if (!showingUpdated) return;
-    setCrumbs([{ name: '最近の更新' }]);
+    if (view !== thisView) return;
     const rows = [upRow(dirRoute(''))];
     for (const f of data.files) {
-      rows.push(fileRow(f.path, { label: [seriesOf(f.path), updatedText(f.mtime)].filter(Boolean).join('　'), withSeriesIcon: true, mtime: f.mtime }));
+      rows.push(fileRow(f.path, { label: seriesAndDate(f.path, f.mtime), withSeriesIcon: true, mtime: f.mtime }));
     }
-    if (!data.files.length) rows.push(h('p', { class: 'empty' }, 'テキストファイルがありません'));
-    $('.list', filerEl).replaceChildren(...rows);
-    window.scrollTo(0, scrollPositions.get(filerKey) ?? 0);
-    if (data.fromCache) toast('つながらないため、保存済みの一覧を表示しています');
+    if (!data.files.length) rows.push(emptyRow('テキストファイルがありません'));
+    showRows(rows);
+    toastIfCached(data, '一覧');
   } catch (e) {
-    if (!showingUpdated) return;
-    $('.list', filerEl).replaceChildren(upRow(dirRoute('')), h('p', { class: 'empty' }, '読み込めませんでした', h('br'), e.message));
+    if (view !== thisView) return;
+    listEl.replaceChildren(upRow(dirRoute('')), loadFailedRow(e));
   }
 }
 
@@ -676,43 +693,46 @@ async function openUpdated() {
 let pendingJump = null;
 
 async function openSearch(query, series = null) {
-  showFiler(`@search:${series ?? ''}:${query}`);
-  $('.sort', filerEl).disabled = true;
-  filerPath = null;
-  markedKind = null;
-  showingUpdated = false;
-  showingHistory = false;
-  searchQuery = query;
-  searchSeries = series;
-  document.title = query ? `検索: ${query}` : '検索';
-  setCrumbs([series ? { name: series, href: dirRoute(series) } : null, { name: '検索' }].filter(Boolean));
-  updateHomeButton(false);
-  const placeholder = series ? 'このシリーズから検索' : 'すべての作品から検索';
-  const input = h('input', { type: 'search', enterkeyhint: 'search', placeholder, 'aria-label': '検索する言葉' });
+  const thisView = { type: 'search', query, series };
+  const crumbs = [series ? { name: series, href: dirRoute(series) } : null, { name: '検索' }].filter(Boolean);
+  showFiler(thisView, { title: query ? `検索: ${query}` : '検索', crumbs });
+  const input = h('input', {
+    type: 'search',
+    enterkeyhint: 'search',
+    placeholder: series ? 'このシリーズから検索' : 'すべての作品から検索',
+    'aria-label': '検索する言葉',
+  });
   input.value = query;
-  const form = h('form', { class: 'search-form', onsubmit: (e) => {
-    e.preventDefault();
-    input.blur();
-    if (input.value.trim()) location.hash = searchRoute(input.value.trim(), series);
-  } }, withClearButton(input));
+  const form = h(
+    'form',
+    {
+      class: 'search-form',
+      onsubmit: (e) => {
+        e.preventDefault();
+        input.blur();
+        if (input.value.trim()) location.hash = searchRoute(input.value.trim(), series);
+      },
+    },
+    withClearButton(input),
+  );
   const results = h('div', { class: 'search-results' });
-  $('.list', filerEl).replaceChildren(form, results);
+  listEl.replaceChildren(form, results);
   if (!query) {
     input.focus();
     return;
   }
-  results.replaceChildren(h('p', { class: 'empty' }, '検索しています…'));
+  results.replaceChildren(emptyRow('検索しています…'));
   try {
     const data = await searchAll(query, series);
     store.setSeriesIcons(data.seriesIcons);
-    if (searchQuery !== query || searchSeries !== series) return;
+    if (view !== thisView) return;
     results.replaceChildren(...renderSearchResults(data, query));
     markUpdatedLater(results);
-    window.scrollTo(0, scrollPositions.get(filerKey) ?? 0);
-    if (data.fromCache) toast('つながらないため、保存済みの結果を表示しています');
+    restoreScroll();
+    toastIfCached(data, '結果');
   } catch (e) {
-    if (searchQuery !== query || searchSeries !== series) return;
-    results.replaceChildren(h('p', { class: 'empty' }, '検索できませんでした', h('br'), e.message));
+    if (view !== thisView) return;
+    results.replaceChildren(loadFailedRow(e, '検索できませんでした'));
   }
 }
 
@@ -747,7 +767,7 @@ function renderSearchResults(data, query) {
   for (const r of data.results) {
     if (r.path !== current) {
       current = r.path;
-      rows.push(fileRow(r.path, { label: r.path.includes('/') ? dirname(r.path).split('/').join(' / ') : null, withSeriesIcon: true }));
+      rows.push(fileRow(r.path, { label: folderLabel(r.path), withSeriesIcon: true }));
     }
     rows.push(
       h(
@@ -795,106 +815,42 @@ function openSortPicker(folderPath) {
   );
 }
 
+// 表示中のフォルダ。フォルダの一覧でなければ null
+const currentFolder = () => (view?.type === 'folder' ? view.path : null);
+
 $('.sort', filerEl).addEventListener('click', () => {
-  openSortPicker(filerPath ?? '');
+  openSortPicker(currentFolder() ?? '');
 });
 
-// Markdown の簡易レンダリング（見出し・箇条書き・段落）
-function renderMarkdown(md) {
-  const container = document.createElement('div');
-  container.className = 'summary-content';
-  const lines = md.split('\n');
-  let currentList = null;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      currentList = null;
-      continue;
-    }
-    const hMatch = line.match(/^(#{1,3})\s+(.*)$/);
-    if (hMatch) {
-      currentList = null;
-      const level = Math.min(hMatch[1].length + 1, 4);
-      const hEl = document.createElement(`h${level}`);
-      hEl.textContent = hMatch[2];
-      container.append(hEl);
-      continue;
-    }
-    const listMatch = line.match(/^[-*•]\s+(.*)$/);
-    if (listMatch) {
-      if (!currentList) {
-        currentList = document.createElement('ul');
-        container.append(currentList);
-      }
-      const li = document.createElement('li');
-      li.textContent = listMatch[1];
-      currentList.append(li);
-      continue;
-    }
-    currentList = null;
-    const p = document.createElement('p');
-    p.textContent = line;
-    container.append(p);
-  }
-  return container;
-}
-
 // 作品（シリーズ）の設定資料から、Gemini であらすじ・登場人物リストを自動生成して表示するシート
-async function openSummarySheet(dirPath) {
-  if (!dirPath) return;
-  const seriesName = basename(dirPath);
+function openSummarySheet(dirPath) {
+  const show = (...content) =>
+    openSheet(h('h2', {}, `「${basename(dirPath)}」の設定・あらすじ`), h('div', { class: 'summary-view' }, content));
+  const generateButton = (label) => h('button', { type: 'button', class: 'summary-btn', onclick: generate }, label);
 
-  function renderView(summary, loading = false) {
-    const content = [];
-    if (loading) {
-      content.push(
-        h(
-          'div',
-          { class: 'summary-empty' },
-          '全体ロードマップやキャラシートから、あらすじと登場人物リストを生成中…（Gemini 3.8 Flash Medium）',
-        ),
-      );
-    } else if (summary?.markdown) {
-      content.push(renderMarkdown(summary.markdown));
-      content.push(
-        h('div', { class: 'summary-meta' }, `生成日時: ${updatedText(summary.updatedAt)}`),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'summary-btn',
-            onclick: () => generate(),
-          },
-          'あらすじと登場人物を再生成',
-        ),
+  function render(summary) {
+    if (summary?.markdown) {
+      show(
+        renderMarkdown(summary.markdown),
+        h('div', { class: 'summary-meta' }, `生成日時: ${shortDate(summary.updatedAt)}`),
+        generateButton('あらすじと登場人物を再生成'),
       );
     } else {
-      content.push(
+      show(
         h(
           'div',
           { class: 'summary-empty' },
           '全体ロードマップやキャラシートから、Gemini (3.8 Flash Medium) であらすじと登場人物リストを自動生成します。\n（※本文や各話プロットは読みません）',
         ),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'summary-btn',
-            onclick: () => generate(),
-          },
-          'あらすじ・登場人物を生成',
-        ),
+        generateButton('あらすじ・登場人物を生成'),
       );
     }
-    openSheet(h('h2', {}, `「${seriesName}」の設定・あらすじ`), h('div', { class: 'summary-view' }, content));
   }
 
   async function generate() {
-    renderView(null, true);
+    show(h('div', { class: 'summary-empty' }, '全体ロードマップやキャラシートから、あらすじと登場人物リストを生成中…（Gemini 3.8 Flash Medium）'));
     try {
-      const res = await generateSummary(dirPath);
-      renderView(res.summary);
+      render((await generateSummary(dirPath)).summary);
     } catch (e) {
       toast(`生成できませんでした: ${e.message}`);
       load();
@@ -903,26 +859,26 @@ async function openSummarySheet(dirPath) {
 
   async function load() {
     try {
-      const { summary } = await fetchSummary(dirPath);
-      renderView(summary);
+      render((await fetchSummary(dirPath)).summary);
     } catch {
-      renderView(null);
+      render(null);
     }
   }
 
-  openSheet(h('h2', {}, `「${seriesName}」の設定・あらすじ`), h('div', { class: 'summary-view' }, '読み込み中…'));
+  show('読み込み中…');
   load();
 }
 
 $('.summary', filerEl).addEventListener('click', () => {
-  if (filerPath) openSummarySheet(filerPath);
+  if (currentFolder()) openSummarySheet(currentFolder());
 });
 
 // iOS はタップの処理の中で focus しないとキーボードを出さないので、hashchange を待たずにその場で検索を開く。
 // シリーズのフォルダの中で押したときは、そのシリーズの中だけを探す
 $('.search', filerEl).addEventListener('click', () => {
-  const series = searchQuery !== null ? searchSeries : filerPath ? filerPath.split('/')[0] : null;
-  const hash = searchRoute(searchQuery ?? '', series);
+  const searching = view?.type === 'search' ? view : null;
+  const series = searching ? searching.series : currentFolder() ? currentFolder().split('/')[0] : null;
+  const hash = searchRoute(searching?.query ?? '', series);
   if (location.hash !== hash) {
     history.pushState(null, '', hash);
     route();
@@ -930,12 +886,10 @@ $('.search', filerEl).addEventListener('click', () => {
   $('.search-form input', filerEl)?.focus();
 });
 
+// トップの一覧にいるときは、一覧のいちばん上へ戻る
 $('.home', filerEl).addEventListener('click', () => {
-  if (filerPath || markedKind || showingUpdated || showingHistory || searchQuery !== null) {
-    location.hash = dirRoute('');
-  } else {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
+  if (currentFolder() === '') window.scrollTo({ top: 0, behavior: 'smooth' });
+  else location.hash = dirRoute('');
 });
 
 // ページ自体をブラウザ的に再読み込みする。Service Worker の更新チェックも挟む
@@ -947,74 +901,6 @@ async function reloadPage() {
     await reg?.update();
   } catch {}
   location.reload();
-}
-
-// 長押しで onLongPress、通常のタップで onClick（省略時はイベント伝播に任せる）を呼ぶ
-function attachLongPress(el, onLongPress, onClick = null) {
-  let timer = null;
-  let startX = 0;
-  let startY = 0;
-  let suppressClick = false;
-
-  const cancel = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-
-  el.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    cancel();
-    startX = e.clientX;
-    startY = e.clientY;
-    timer = setTimeout(() => {
-      timer = null;
-      suppressClick = true;
-      setTimeout(() => (suppressClick = false), 800);
-      try {
-        navigator.vibrate?.(50);
-      } catch {}
-      onLongPress(e);
-    }, 500);
-  });
-
-  el.addEventListener('pointermove', (e) => {
-    if (!timer) return;
-    if (Math.hypot(e.clientX - startX, e.clientY - startY) > 10) {
-      cancel();
-    }
-  });
-
-  el.addEventListener('pointerup', cancel);
-  el.addEventListener('pointercancel', cancel);
-
-  el.addEventListener('click', (e) => {
-    if (suppressClick) {
-      suppressClick = false;
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-    if (onClick) onClick(e);
-  });
-
-  el.addEventListener('contextmenu', (e) => {
-    if (suppressClick) {
-      e.preventDefault();
-    }
-  });
-}
-
-// 今の一覧を、スクロール位置を保ったまま読み直す
-function refreshFiler() {
-  scrollPositions.set(filerKey, window.scrollY);
-  filerKey = null;
-  if (markedKind) openMarked(markedKind);
-  else if (showingUpdated) openUpdated();
-  else if (showingHistory) openHistory();
-  else if (searchQuery !== null) openSearch(searchQuery, searchSeries);
-  else openFiler(filerPath ?? '');
 }
 
 attachLongPress($('.reload', filerEl), reloadPage, refreshFiler);
@@ -1032,16 +918,11 @@ async function openReader(path) {
   hideMenu();
   closeSheet();
   closeViewer();
-  if (searchQuery) backToSearch = searchRoute(searchQuery, searchSeries);
+  if (view?.type === 'search' && view.query) backToSearch = searchRoute(view.query, view.series);
   else if (!currentFile) backToSearch = null;
   $('.back', menuEl).textContent = backToSearch ? '‹ 検索' : '‹ フォルダ';
-  if (filerKey !== null) scrollPositions.set(filerKey, window.scrollY);
-  filerKey = null;
-  filerPath = null;
-  markedKind = null;
-  showingUpdated = false;
-  showingHistory = false;
-  searchQuery = null;
+  rememberScroll();
+  view = null;
   filerEl.hidden = true;
   readerEl.hidden = false;
   currentFile = path;
@@ -1050,15 +931,15 @@ async function openReader(path) {
   $('.menu-marks', menuEl).replaceChildren(...markButtons(path));
   document.title = displayName(path);
   siblings = fetchList(dirname(path));
-  const next = siblings.then((list) => nextEpisodeIn(list, path));
-  const prev = siblings.then((list) => prevEpisodeIn(list, path));
+  const next = siblings.then((list) => episodeNextTo(list, path, 1));
+  const prev = siblings.then((list) => episodeNextTo(list, path, -1));
   const initialPage = pendingInitialPage;
   pendingInitialPage = null;
   try {
     const { fromCache } = await reader.open(path, settings, { nextPromise: next, prevPromise: prev, initialPage });
     if (pendingJump?.path === path && currentFile === path) reader.jumpTo(pendingJump.line, pendingJump.query);
     pendingJump = null;
-    if (fromCache) toast('つながらないため、保存済みの本文を表示しています');
+    toastIfCached({ fromCache }, '本文');
   } catch (e) {
     if (currentFile !== path) return;
     store.deletePosition(path);
@@ -1067,18 +948,14 @@ async function openReader(path) {
   }
 }
 
-function prevEpisodeIn(list, path) {
+// フォルダの一覧 list の中で、path の次（offset が 1）か前（-1）の話 { name, path, href }。なければ null
+function episodeNextTo(list, path, offset) {
   const files = sortedFiles(list);
   const i = files.findIndex((f) => childPath(list.path, f.name) === path);
-  const f = i > 0 ? files[i - 1] : null;
-  return f ? { name: displayName(f.name), path: childPath(list.path, f.name), href: fileRoute(childPath(list.path, f.name)) } : null;
-}
-
-function nextEpisodeIn(list, path) {
-  const files = sortedFiles(list);
-  const i = files.findIndex((f) => childPath(list.path, f.name) === path);
-  const f = i >= 0 ? files[i + 1] : null;
-  return f ? { name: displayName(f.name), path: childPath(list.path, f.name), href: fileRoute(childPath(list.path, f.name)) } : null;
+  const f = i >= 0 ? files[i + offset] : null;
+  if (!f) return null;
+  const filePath = childPath(list.path, f.name);
+  return { name: displayName(f.name), path: filePath, href: fileRoute(filePath) };
 }
 
 // フォルダを読み直して、目次と前後の話を新しい話に追いつかせる
@@ -1087,7 +964,7 @@ async function reloadSiblings() {
   siblings = fetchList(dirname(path));
   const list = await siblings.catch(() => null);
   if (list && currentFile === path) {
-    reader.setEpisodes({ next: nextEpisodeIn(list, path), prev: prevEpisodeIn(list, path) });
+    reader.setEpisodes({ next: episodeNextTo(list, path, 1), prev: episodeNextTo(list, path, -1) });
   }
   return list;
 }
@@ -1108,23 +985,21 @@ function updatePageInfo(page, pages) {
   $('.pageinfo', menuEl).textContent = `${page + 1} / ${pages}（${Math.floor(((page + 1) / pages) * 100)}%）`;
 
   const metricsEl = $('.reading-metrics', menuEl);
-  if (metricsEl) {
-    const m = reader.getReadingMetrics?.();
-    if (m && m.chars > 0) {
-      const remainingPages = pages - 1 - page;
-      let timeText = `読了目安 約 ${m.readingMinutes} 分`;
-      if (remainingPages === 0 && pages > 1) {
-        timeText = '読了';
-      } else if (page > 0 && pages > 1) {
-        const remainingRatio = remainingPages / pages;
-        const remMin = Math.max(1, Math.round(m.readingMinutes * remainingRatio));
-        timeText = `読了目安 約 ${m.readingMinutes} 分（残り約 ${remMin} 分）`;
-      }
-      metricsEl.textContent = `${m.chars.toLocaleString()} 字（原稿用紙 ${m.manuscriptPages} 枚） / ${timeText}`;
-    } else {
-      metricsEl.textContent = '';
-    }
+  if (metricsEl) metricsEl.textContent = readingMetricsText(reader.getReadingMetrics(), page, pages);
+}
+
+// 「12,345 字（原稿用紙 31 枚） / 読了目安 約 25 分（残り約 10 分）」
+function readingMetricsText(metrics, page, pages) {
+  if (!metrics?.chars) return '';
+  const { chars, manuscriptPages, readingMinutes } = metrics;
+  let time = `読了目安 約 ${readingMinutes} 分`;
+  if (pages > 1 && page === pages - 1) {
+    time = '読了';
+  } else if (pages > 1 && page > 0) {
+    const remaining = Math.max(1, Math.round(readingMinutes * ((pages - 1 - page) / pages)));
+    time = `読了目安 約 ${readingMinutes} 分（残り約 ${remaining} 分）`;
   }
+  return `${chars.toLocaleString()} 字（原稿用紙 ${manuscriptPages} 枚） / ${time}`;
 }
 
 function showMenu() {
@@ -1172,277 +1047,166 @@ $('.actions', menuEl).addEventListener('click', (e) => {
 
 attachLongPress($('[data-action="reload"]', menuEl), reloadPage);
 
-// 付箋（推敲メモ）シート
+// 付箋（推敲メモ）シート。上に入力欄（または追加ボタン）、下にこの話の付箋の一覧を出す。
+// 本文の付箋の印から開いたときは、その付箋（noteId）か、その行（line）の付箋の入力欄を開いておく
 function openNotesSheet(targetLine = null, targetNoteId = null) {
   if (!currentFile) return;
   hideMenu();
   const filePath = currentFile;
-  const pathNotes = store.getNotesForPath(filePath);
 
-  let editingNote =
-    targetNoteId !== null
-      ? pathNotes.find((n) => n.id === targetNoteId)
-      : targetLine !== null
-        ? pathNotes.find((n) => n.line === targetLine)
-        : null;
-  let showForm = targetLine !== null || targetNoteId !== null;
-  let initialTargetLine = targetLine;
-
-  function renderBody() {
-    const items = store.getNotesForPath(filePath);
-    const content = [];
-
-    if (showForm) {
-      const lineInfo = reader.currentLineInfo();
-      const line = editingNote ? editingNote.line : (initialTargetLine ?? lineInfo.line);
-      const off = editingNote ? (editingNote.off ?? 0) : (initialTargetLine !== null ? 0 : lineInfo.off);
-      const snippet = editingNote ? editingNote.snippet : lineInfo.snippet;
-
-      const textarea = h('textarea', { placeholder: 'メモを入力（空欄でも保存できます）', 'aria-label': 'メモ本文' });
-      if (editingNote) textarea.value = editingNote.text;
-
-      const form = h(
-        'div',
-        { class: 'note-form' },
-        h('div', { class: 'note-item-snippet' }, `第 ${line + 1} 行${snippet ? `: ${snippet.slice(0, 30)}…` : ''}`),
-        textarea,
-        h(
-          'div',
-          { class: 'note-form-buttons' },
-          editingNote
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'delete',
-                  onclick: () => {
-                    store.deleteNote(editingNote.id);
-                    showForm = false;
-                    editingNote = null;
-                    initialTargetLine = null;
-                    reader.markNotes();
-                    renderBody();
-                  },
-                },
-                '削除',
-              )
-            : null,
-          h(
-            'button',
-            {
-              type: 'button',
-              onclick: () => {
-                showForm = false;
-                editingNote = null;
-                initialTargetLine = null;
-                renderBody();
-              },
-            },
-            'キャンセル',
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'save',
-              onclick: () => {
-                const text = textarea.value.trim();
-                const existingOnPos = items.find((n) => n.line === line && (n.off ?? 0) === off);
-                store.saveNote({
-                  id: editingNote?.id ?? existingOnPos?.id,
-                  path: filePath,
-                  line,
-                  off,
-                  snippet,
-                  text,
-                });
-                showForm = false;
-                editingNote = null;
-                initialTargetLine = null;
-                reader.markNotes();
-                renderBody();
-              },
-            },
-            '保存',
-          ),
-        ),
-      );
-      content.push(form);
-    } else {
-      content.push(
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'note-add-btn',
-            onclick: () => {
-              showForm = true;
-              editingNote = null;
-              initialTargetLine = null;
-              renderBody();
-            },
-          },
-          '＋ このページの位置に付箋を追加',
-        ),
-      );
-    }
-
-    if (!items.length && !showForm) {
-      content.push(h('p', { class: 'empty' }, 'この作品の付箋はまだありません'));
-    } else {
-      for (const note of items) {
-        content.push(
-          h(
-            'div',
-            {
-              class: 'note-item',
-              onclick: () => {
-                reader.jumpToNote(note);
-                closeSheet();
-                hideMenu();
-              },
-            },
-            h(
-              'div',
-              { class: 'note-item-header' },
-              h('span', {}, `第 ${note.line + 1} 行`),
-              h('span', {}, updatedText(note.updatedAt)),
-            ),
-            note.snippet ? h('div', { class: 'note-item-snippet' }, note.snippet) : null,
-            note.text ? h('div', { class: 'note-item-text' }, note.text) : null,
-            h(
-              'div',
-              { class: 'note-item-actions' },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  onclick: (e) => {
-                    e.stopPropagation();
-                    editingNote = note;
-                    showForm = true;
-                    renderBody();
-                  },
-                },
-                '編集',
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'delete',
-                  onclick: (e) => {
-                    e.stopPropagation();
-                    store.deleteNote(note.id);
-                    if (editingNote?.id === note.id) {
-                      editingNote = null;
-                      showForm = false;
-                    }
-                    reader.markNotes();
-                    renderBody();
-                  },
-                },
-                '削除',
-              ),
-            ),
-          ),
-        );
-      }
-    }
-
-    openSheet(h('h2', {}, `付箋（推敲メモ）`), h('div', { class: 'notes-view' }, content));
+  // 開いている入力欄。null なら閉じている。
+  // note は書き直す付箋（新しく付けるときは null）、line は新しく付ける行（null なら今のページの先頭）
+  let form = null;
+  if (targetNoteId !== null || targetLine !== null) {
+    const notes = store.getNotesForPath(filePath);
+    const note = targetNoteId !== null ? notes.find((n) => n.id === targetNoteId) : notes.find((n) => n.line === targetLine);
+    form = { note: note ?? null, line: targetLine };
   }
 
-  renderBody();
+  const setForm = (next) => {
+    form = next;
+    render();
+  };
+
+  function render() {
+    const notes = store.getNotesForPath(filePath);
+    openSheet(
+      h('h2', {}, '付箋（推敲メモ）'),
+      h(
+        'div',
+        { class: 'notes-view' },
+        form
+          ? noteForm(notes)
+          : h('button', { type: 'button', class: 'note-add-btn', onclick: () => setForm({ note: null, line: null }) }, '＋ このページの位置に付箋を追加'),
+        !notes.length && !form ? emptyRow('この作品の付箋はまだありません') : notes.map(noteItem),
+      ),
+    );
+  }
+
+  // 入力欄の付箋を付ける位置
+  function formPosition() {
+    if (form.note) return { line: form.note.line, off: form.note.off ?? 0, snippet: form.note.snippet };
+    const here = reader.currentLineInfo();
+    return form.line === null ? here : { line: form.line, off: 0, snippet: here.snippet };
+  }
+
+  function noteForm(notes) {
+    const editing = form.note;
+    const { line, off, snippet } = formPosition();
+    const textarea = h('textarea', { placeholder: 'メモを入力（空欄でも保存できます）', 'aria-label': 'メモ本文' });
+    if (editing) textarea.value = editing.text;
+    const save = () => {
+      // 同じ位置に付箋があれば、新しく作らずにそれを書き直す
+      const samePlace = notes.find((n) => n.line === line && (n.off ?? 0) === off);
+      store.saveNote({ id: editing?.id ?? samePlace?.id, path: filePath, line, off, snippet, text: textarea.value.trim() });
+      reader.markNotes();
+      setForm(null);
+    };
+    const remove = () => {
+      store.deleteNote(editing.id);
+      reader.markNotes();
+      setForm(null);
+    };
+    return h(
+      'div',
+      { class: 'note-form' },
+      h('div', { class: 'note-item-snippet' }, `第 ${line + 1} 行${snippet ? `: ${snippet.slice(0, 30)}…` : ''}`),
+      textarea,
+      h(
+        'div',
+        { class: 'note-form-buttons' },
+        editing ? h('button', { type: 'button', class: 'delete', onclick: remove }, '削除') : null,
+        h('button', { type: 'button', onclick: () => setForm(null) }, 'キャンセル'),
+        h('button', { type: 'button', class: 'save', onclick: save }, '保存'),
+      ),
+    );
+  }
+
+  // 一覧の付箋。押すとその位置へ移る
+  function noteItem(note) {
+    // 押しても、付箋の位置へ移らないようにする
+    const action = (label, className, run) => {
+      const onclick = (e) => {
+        e.stopPropagation();
+        run();
+      };
+      return h('button', { type: 'button', class: className, onclick }, label);
+    };
+    const remove = () => {
+      store.deleteNote(note.id);
+      reader.markNotes();
+      if (form?.note?.id === note.id) form = null;
+      render();
+    };
+    return h(
+      'div',
+      {
+        class: 'note-item',
+        onclick: () => {
+          reader.jumpToNote(note);
+          closeSheet();
+          hideMenu();
+        },
+      },
+      h('div', { class: 'note-item-header' }, h('span', {}, `第 ${note.line + 1} 行`), h('span', {}, shortDate(note.updatedAt))),
+      note.snippet ? h('div', { class: 'note-item-snippet' }, note.snippet) : null,
+      note.text ? h('div', { class: 'note-item-text' }, note.text) : null,
+      h('div', { class: 'note-item-actions' }, action('編集', null, () => setForm({ note, line: null })), action('削除', 'delete', remove)),
+    );
+  }
+
+  render();
 }
 
-// 差分（ビフォー・アフター）の詳細シート
+// 差分（ビフォー・アフター）の詳細シート。hunks は本文のすべての変更のまとまりで、hunk はそのうち index 番目
 function openDiffSheet(hunk, hunks = [], index = 0) {
-  const deletedText = hunk.deleted?.length ? hunk.deleted.join('\n') : '';
-  const addedText = hunk.added?.length ? hunk.added.join('\n') : '';
+  const deletedText = hunk.deleted?.join('\n') ?? '';
+  const addedText = hunk.added?.join('\n') ?? '';
+  const empty = (text = '（なし）') => h('span', { class: 'diff-empty' }, text);
 
-  const isBaselineMissing = deletedText === '（変更前のテキストは保存されていません）';
-
-  let bChildren;
-  let aChildren;
-
-  if (isBaselineMissing) {
-    bChildren = [h('span', { class: 'diff-empty' }, deletedText)];
-    aChildren = addedText ? [addedText] : [h('span', { class: 'diff-empty' }, '（なし）')];
+  let before;
+  let after;
+  if (deletedText === BASELINE_MISSING) {
+    // 比べる相手がないので、変更後をそのまま出す
+    before = [empty(deletedText)];
+    after = addedText ? [addedText] : [empty()];
   } else {
-    const { before: bTokens, after: aTokens } = diffChars(deletedText, addedText);
-    const renderTokens = (tokens, emptyText = '（なし）') => {
-      if (!tokens.length) return [h('span', { class: 'diff-empty' }, emptyText)];
-      return tokens.map((t) => {
-        if (t.type === 'delete') return h('del', { class: 'diff-del' }, t.text);
-        if (t.type === 'insert') return h('ins', { class: 'diff-ins' }, t.text);
-        return t.text;
-      });
+    const tokens = diffChars(deletedText, addedText);
+    const tokenNode = (t) => {
+      if (t.type === 'delete') return h('del', { class: 'diff-del' }, t.text);
+      if (t.type === 'insert') return h('ins', { class: 'diff-ins' }, t.text);
+      return t.text;
     };
-    bChildren = renderTokens(bTokens);
-    aChildren = renderTokens(aTokens);
+    const render = (list) => (list.length ? list.map(tokenNode) : [empty()]);
+    before = render(tokens.before);
+    after = render(tokens.after);
   }
 
+  // 縦書きの本文と同じく、左が後ろ（次の変更）、右が前（前の変更）
+  const goTo = (i) => {
+    reader.jumpTo(hunks[i].line);
+    openDiffSheet(hunks[i], hunks, i);
+  };
   const nav =
     hunks.length > 1
       ? h(
           'div',
           { class: 'diff-nav' },
-          h(
-            'button',
-            {
-              disabled: index >= hunks.length - 1,
-              onclick: () => {
-                const next = hunks[index + 1];
-                reader.jumpTo(next.line);
-                openDiffSheet(next, hunks, index + 1);
-              },
-            },
-            '‹ 次の変更',
-          ),
+          h('button', { disabled: index >= hunks.length - 1, onclick: () => goTo(index + 1) }, '‹ 次の変更'),
           h('span', { class: 'diff-count' }, `${index + 1} / ${hunks.length}`),
-          h(
-            'button',
-            {
-              disabled: index <= 0,
-              onclick: () => {
-                const prev = hunks[index - 1];
-                reader.jumpTo(prev.line);
-                openDiffSheet(prev, hunks, index - 1);
-              },
-            },
-            '前の変更 ›',
-          ),
+          h('button', { disabled: index <= 0, onclick: () => goTo(index - 1) }, '前の変更 ›'),
         )
       : null;
 
-  openSheet(
-    h('h2', {}, '変更箇所の差分'),
-    nav,
-    h(
-      'div',
-      { class: 'diff-view' },
-      h(
-        'div',
-        { class: 'diff-pane deleted' },
-        h('div', { class: 'diff-header' }, '変更前'),
-        h('div', { class: 'diff-box' }, h('div', { class: 'diff-text' }, ...bChildren)),
-      ),
-      h(
-        'div',
-        { class: 'diff-pane added' },
-        h('div', { class: 'diff-header' }, '変更後'),
-        h('div', { class: 'diff-box' }, h('div', { class: 'diff-text' }, ...aChildren)),
-      ),
-    ),
-  );
+  const pane = (className, label, children) =>
+    h('div', { class: `diff-pane ${className}` }, h('div', { class: 'diff-header' }, label), h('div', { class: 'diff-box' }, h('div', { class: 'diff-text' }, ...children)));
+  openSheet(h('h2', {}, '変更箇所の差分'), nav, h('div', { class: 'diff-view' }, pane('deleted', '変更前', before), pane('added', '変更後', after)));
   sheetEl.classList.add('diff');
 
+  // 縦書きなので、右端（文頭）から見せる
   requestAnimationFrame(() => {
     const view = $('.diff-view', sheetEl);
-    if (view) {
-      view.scrollLeft = view.scrollWidth;
-    }
+    if (view) view.scrollLeft = view.scrollWidth;
   });
 }
 
@@ -1504,7 +1268,7 @@ async function reloadToc() {
   await openToc({ reload: true });
   body.scrollTop = top;
   const list = await siblings.catch(() => null);
-  if (list?.fromCache) toast('つながらないため、保存済みの目次を表示しています');
+  toastIfCached(list, '目次');
 }
 
 // 読んでいる作品の中を探す。結果を押すとそのページへ移り、見つかった言葉に印を付ける
@@ -1659,6 +1423,13 @@ function confirmDialog({ title, message, ok = 'OK', cancel = 'キャンセル' }
   });
 }
 
+// サーバーから取り込んだ印や読書位置を、表示中の一覧に反映する
+function applySyncedData() {
+  settings = store.loadSettings();
+  applyTheme();
+  if (!filerEl.hidden) refreshFiler();
+}
+
 // 別の端末で先まで読み進められていたら、そのページへ移るか尋ねる。
 // 断ったら、同じ位置（より先に進まれるまで）は二度と尋ねない
 let declinedRemote = null;
@@ -1690,11 +1461,7 @@ async function onActivate() {
   if (syncingOnActivate) return;
   syncingOnActivate = true;
   try {
-    await store.syncWithServer(() => {
-      settings = store.loadSettings();
-      applyTheme();
-      if (!filerEl.hidden) refreshFiler();
-    });
+    await store.syncWithServer(applySyncedData);
     if (!currentFile) return;
     const r = await reader.checkUpdate();
     if (r.changed) toast('ファイルが更新されていたので読み直しました');
@@ -1774,9 +1541,5 @@ if (!location.hash) {
   if (last) history.replaceState(null, '', last);
 }
 // 開く話の読書位置を決める前に他の端末の位置を取り込めるよう、画面を開く前に同期を始めておく
-store.syncWithServer(() => {
-  settings = store.loadSettings();
-  applyTheme();
-  if (!filerEl.hidden) refreshFiler();
-});
+store.syncWithServer(applySyncedData);
 route();
