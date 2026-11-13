@@ -15,8 +15,10 @@ launchctl kickstart -k gui/$(id -u)/local.unicobook
 コード変更後はテストを実行して破損がないことを確認すること。
 
 ```bash
-npm test
+pnpm test
 ```
+
+npm は使わず、pnpm を使うこと。
 
 ### 変更時の都度コミット
 

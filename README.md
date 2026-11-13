@@ -40,11 +40,11 @@ AI は下の「AI 向けの導入手順」を読んで作業を進めます。�
 
 この節は、導入を頼まれた AI エージェントに向けた手順です。上から順に実行してください。
 
-1. **前提を確認する**: macOS であること、`node --version` が 24 以上であることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。依存パッケージはないので、`npm install` は不要です。
+1. **前提を確認する**: macOS であること、`node --version` が 24 以上であること、`pnpm --version` で pnpm が使えることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。依存パッケージはないので、`pnpm install` は不要です。このプロジェクトでは npm は使わず、pnpm を使ってください。
 2. **リポジトリを置く**: `git clone https://github.com/whiteleaf7/unicobook.git` で取得します。置き場所はユーザーに確認してください。launchd にはこの場所のパスを登録するため、導入後にリポジトリを移動するとサーバーが起動しなくなります。
 3. **小説フォルダを決める**: 配信する小説フォルダのパスをユーザーに尋ねます（例: iCloud Drive の `~/Library/Mobile Documents/com~apple~CloudDocs/novels`）。フォルダの構成は「[小説フォルダの置き方](#小説フォルダの置き方)」を参照してください。
 4. **設定ファイルを作る**: `cp .env.example .env` を実行し、`.env` の `UNICOBOOK_ROOT` を手順 3 のパスに書き換えます。ほかの項目は「[設定](#設定)」の表のとおり既定値のままで構いません。
-5. **テストを実行する**: `npm test` がすべて通ることを確かめます。
+5. **テストを実行する**: `pnpm test` がすべて通ることを確かめます。
 6. **常駐サーバーとして登録する**: `scripts/install-agent.sh` を実行します。ログイン時に自動で起動し、落ちたときは再起動する launchd サービス（`local.unicobook`）として登録されます。
 7. **動作を確認する**: `curl -sI http://127.0.0.1:8787/` が `200` を返すことを確かめます。うまくいかないときは `~/Library/Logs/unicobook.log` を読んでください。小説フォルダが iCloud Drive にある場合、初回は macOS が node に iCloud Drive へのアクセス許可を求めるダイアログを出します。ユーザーに「許可」を押してもらってください。許可されないと、ログに `EPERM: operation not permitted` が出てフォルダ一覧が読めません。
 8. **iPhone から読めるようにする**: Tailscale が入っていてログイン済みであれば、`tailscale serve --bg 8787` を実行します（`tailscale` コマンドがなければ `/Applications/Tailscale.app/Contents/MacOS/Tailscale` を使います）。tailnet で HTTPS が有効になっていないと、有効にするための URL が表示されるので、ユーザーに開いてもらってください。Tailscale が入っていなければ、この手順は飛ばして、PC のブラウザで `http://localhost:8787/` を開けば読めることを伝えます。
@@ -111,7 +111,7 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
 
 ## セットアップ
 
-必要なもの: macOS、Node.js 24 以降、Tailscale（iPhone から読む場合）
+必要なもの: macOS、Node.js 24 以降、pnpm、Tailscale（iPhone から読む場合）
 
 ### Mac
 
@@ -210,8 +210,8 @@ launchctl kickstart -k gui/$(id -u)/local.unicobook
 ## 開発
 
 ```sh
-npm start   # サーバーを起動する（設定は .env）
-npm test    # テストを実行する
+pnpm start  # サーバーを起動する（設定は .env）
+pnpm test   # テストを実行する
 swift scripts/make-icons.swift public/icons /path/to/icon.png   # アプリのアイコンを作り直す
 swift scripts/make-placeholder-icon.swift server/placeholder-icon.png   # 「仮」のアイコンを作り直す
 ```
