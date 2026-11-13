@@ -75,7 +75,10 @@ test('diffChars: 文字単位の変更・追加・削除を正しく検出する
 
   // before: "今日は" (equal), "良い天気" (equal), "だ" (delete)
   assert.equal(bParts.map((p) => p.text).join(''), before);
-  assert.deepEqual(bParts.find((p) => p.type === 'delete'), { type: 'delete', text: 'だ' });
+  assert.deepEqual(
+    bParts.find((p) => p.type === 'delete'),
+    { type: 'delete', text: 'だ' },
+  );
 
   // after: "今日は" (equal), "とても" (insert), "良い天気" (equal), "ですね" (insert)
   assert.equal(aParts.map((p) => p.text).join(''), after);

@@ -20,13 +20,7 @@ function hostnameOf(host: string): string {
 export function isAllowedHost(host: string | undefined, extraHosts: string[] = EXTRA_HOSTS): boolean {
   if (!host) return false;
   const name = hostnameOf(host);
-  return (
-    name === 'localhost' ||
-    name === '127.0.0.1' ||
-    name === '[::1]' ||
-    name.endsWith('.ts.net') ||
-    extraHosts.includes(name)
-  );
+  return name === 'localhost' || name === '127.0.0.1' || name === '[::1]' || name.endsWith('.ts.net') || extraHosts.includes(name);
 }
 
 /** 受け付けてはいけないリクエストなら理由を、問題なければ null を返す */

@@ -59,10 +59,7 @@ test('行の途中の地付きは後ろだけを下に寄せる', () => {
 test('字下げと折り返し', () => {
   assert.equal(parseAozora('［＃３字下げ］本文'), '<p data-l="0" style="padding-inline-start:3em">本文</p>');
   const html = parseAozora('［＃ここから２字下げ、折り返して４字下げ］\n本文\n［＃ここで字下げ終わり］\n次');
-  assert.equal(
-    html,
-    '<p data-l="1" style="padding-inline-start:4em;text-indent:-2em">本文</p>\n<p data-l="3">次</p>',
-  );
+  assert.equal(html, '<p data-l="1" style="padding-inline-start:4em;text-indent:-2em">本文</p>\n<p data-l="3">次</p>');
 });
 
 test('挿絵は画像のブロックになり、相対パスを解決する', () => {
@@ -130,7 +127,8 @@ test('外字注記', () => {
 });
 
 test('記号説明ブロックを取り除く', () => {
-  const src = '題名\n作者\n\n-------------------------------------------------------\n【テキスト中に現れる記号について】\n\n《》：ルビ\n-------------------------------------------------------\n本文';
+  const src =
+    '題名\n作者\n\n-------------------------------------------------------\n【テキスト中に現れる記号について】\n\n《》：ルビ\n-------------------------------------------------------\n本文';
   const html = parseAozora(src);
   assert.doesNotMatch(html, /記号について/);
   assert.match(html, /本文/);

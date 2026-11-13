@@ -84,7 +84,7 @@ function mergePatches(older, newer) {
 if (typeof window !== 'undefined') {
   // 離れるときは貯めている変更をすぐに送る
   window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushPush();
+    if (document.visibilityState === 'hidden') void flushPush();
   });
   window.addEventListener('pagehide', flushPush);
   window.addEventListener('online', () => {

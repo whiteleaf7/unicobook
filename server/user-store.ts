@@ -118,5 +118,5 @@ export function applyPatch(patch: Record<string, unknown>) {
   }
 }
 
-const updatedAtOf = (v: unknown) => ((v as { updatedAt?: number } | undefined)?.updatedAt ?? 0);
+const updatedAtOf = (v: unknown) => (v as { updatedAt?: number } | undefined)?.updatedAt ?? 0;
 const isOlder = (next: unknown, current: unknown) => current !== undefined && updatedAtOf(next) < updatedAtOf(current);

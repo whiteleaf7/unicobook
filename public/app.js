@@ -1,6 +1,19 @@
 import { Reader, BASELINE_MISSING } from './reader.js';
 import { openViewer, closeViewer, isViewerOpen } from './viewer.js';
-import { fetchList, fetchRecentlyUpdated, fetchTexts, searchAll, dirname, basename, largeImageUrl, iconUrl, saveIconSetting, generateIcon, fetchSummary, generateSummary } from './api.js';
+import {
+  fetchList,
+  fetchRecentlyUpdated,
+  fetchTexts,
+  searchAll,
+  dirname,
+  basename,
+  largeImageUrl,
+  iconUrl,
+  saveIconSetting,
+  generateIcon,
+  fetchSummary,
+  generateSummary,
+} from './api.js';
 import { PRESET_GROUPS, hasPreset, presetIcon } from './presets.js';
 import { diffChars } from './diff.js';
 import { $, h } from './dom.js';
@@ -45,12 +58,16 @@ window.__reader = reader;
 // 本文と挿絵では端で触れ始めたときの既定の動きを止める。ページめくりは pointer イベントで受けるので止まらない。
 // リンクやボタンは click が要るので止めない
 const EDGE_WIDTH = 32;
-document.addEventListener('touchstart', (e) => {
-  const x = e.touches[0].clientX;
-  if (x > EDGE_WIDTH && x < window.innerWidth - EDGE_WIDTH) return;
-  if (!e.target.closest('#reader, #viewer') || e.target.closest('a, button')) return;
-  e.preventDefault();
-}, { passive: false });
+document.addEventListener(
+  'touchstart',
+  (e) => {
+    const x = e.touches[0].clientX;
+    if (x > EDGE_WIDTH && x < window.innerWidth - EDGE_WIDTH) return;
+    if (!e.target.closest('#reader, #viewer') || e.target.closest('a, button')) return;
+    e.preventDefault();
+  },
+  { passive: false },
+);
 
 const dirRoute = (path) => `#/d/${encodeURIComponent(path)}`;
 const fileRoute = (path) => `#/r/${encodeURIComponent(path)}`;
@@ -206,8 +223,8 @@ function route() {
   const hash = location.hash || dirRoute('');
   store.setLastRoute(hash);
   const target = parseRoute(hash);
-  if (target.type === 'reader') openReader(target.path);
-  else openView(target);
+  if (target.type === 'reader') void openReader(target.path);
+  else void openView(target);
 }
 
 // ファイラー
@@ -238,7 +255,7 @@ function openView(v) {
 
 // 今の一覧を、スクロール位置を保ったまま読み直す
 function refreshFiler() {
-  openView(view ?? { type: 'folder', path: '' });
+  void openView(view ?? { type: 'folder', path: '' });
 }
 
 // 一覧ごとのスクロール位置（リーダーから戻ったときや読み直したときに、元の場所を表示するため）
@@ -296,12 +313,11 @@ function setCrumbs(crumbs) {
 // 一覧の行を出し、更新の印を付け、前に見ていたスクロール位置に戻す
 function showRows(rows) {
   listEl.replaceChildren(...rows);
-  markUpdatedLater(listEl);
+  void markUpdatedLater(listEl);
   restoreScroll();
 }
 
-const upRow = (href) =>
-  h('div', { class: 'row up' }, h('a', { class: 'main', href }, icon('up'), h('span', { class: 'name' }, '..')));
+const upRow = (href) => h('div', { class: 'row up' }, h('a', { class: 'main', href }, icon('up'), h('span', { class: 'name' }, '..')));
 
 const emptyRow = (...message) => h('p', { class: 'empty' }, ...message);
 
@@ -326,9 +342,7 @@ async function openFiler(path) {
 function renderFiler(data) {
   const { path } = data;
   const segments = path ? path.split('/') : [];
-  const crumbs = path
-    ? segments.map((name, i) => ({ name, href: dirRoute(segments.slice(0, i + 1).join('/')) }))
-    : [{ name: APP_NAME, href: dirRoute('') }];
+  const crumbs = path ? segments.map((name, i) => ({ name, href: dirRoute(segments.slice(0, i + 1).join('/')) })) : [{ name: APP_NAME, href: dirRoute('') }];
   setCrumbs(crumbs);
 
   const rows = path ? [upRow(dirRoute(dirname(path)))] : topSections(data);
@@ -370,7 +384,13 @@ function topSections(data) {
   }
   // 後で読む・お気に入り・最近の更新の一覧への入口は、縦幅を取らないよう 1 行に並べる
   const shortcut = (href, iconName, label, count) =>
-    h('a', { class: 'shortcut', href }, icon(iconName), h('span', { class: 'label' }, label), count == null ? null : h('span', { class: 'count' }, String(count)));
+    h(
+      'a',
+      { class: 'shortcut', href },
+      icon(iconName),
+      h('span', { class: 'label' }, label),
+      count == null ? null : h('span', { class: 'count' }, String(count)),
+    );
   rows.push(
     h(
       'nav',
@@ -397,12 +417,10 @@ function folderRows(data) {
     ...data.files.map((f) => ({ name: f.name, path: childPath(path, f.name), mtime: f.mtime, isDir: false, info: f })),
   ];
   const rowOf = (item, pinned) =>
-    item.isDir
-      ? dirRow(item.path, { iconInfo: item.info.icon, texts: item.info.texts, pinned })
-      : fileRow(item.path, { mtime: item.info.mtime, pinned });
+    item.isDir ? dirRow(item.path, { iconInfo: item.info.icon, texts: item.info.texts, pinned }) : fileRow(item.path, { mtime: item.info.mtime, pinned });
   const sorted = (list) => [...list].sort(compare);
   return [true, false].flatMap((pinned) => {
-    const group = items.filter((item) => (item.path in pins) === pinned);
+    const group = items.filter((item) => item.path in pins === pinned);
     const dirs = sorted(group.filter((item) => item.isDir));
     const files = sorted(group.filter((item) => !item.isDir));
     return [...dirs, ...files].map((item) => rowOf(item, pinned));
@@ -508,7 +526,11 @@ function openIconPicker(dirPath, iconInfo) {
         'div',
         { class: 'preset-grid' },
         group.presets.map((p) =>
-          h('button', { class: `preset-choice${current === p.id ? ' selected' : ''}`, 'aria-label': p.text ?? p.id, onclick: () => choose(p.id) }, presetIcon(p.id)),
+          h(
+            'button',
+            { class: `preset-choice${current === p.id ? ' selected' : ''}`, 'aria-label': p.text ?? p.id, onclick: () => choose(p.id) },
+            presetIcon(p.id),
+          ),
         ),
       ),
     ]),
@@ -535,12 +557,7 @@ function iconFileSetting(dirPath, iconInfo) {
   });
   showNote(checkbox.checked);
   return [
-    h(
-      'div',
-      { class: 'icon-file' },
-      fileIcon(dirPath, iconInfo.version, 'dir'),
-      h('span', { class: 'icon-file-name' }, `フォルダの画像（${iconInfo.file}）`),
-    ),
+    h('div', { class: 'icon-file' }, fileIcon(dirPath, iconInfo.version, 'dir'), h('span', { class: 'icon-file-name' }, `フォルダの画像（${iconInfo.file}）`)),
     h('label', { class: 'icon-file-option' }, checkbox, '画像より下で選んだアイコンを優先する'),
     note,
   ];
@@ -576,7 +593,7 @@ function iconGenerator(dirPath, iconInfo) {
         class: 'icon-generator',
         onsubmit: (e) => {
           e.preventDefault();
-          if (!generateButton.disabled) generate();
+          if (!generateButton.disabled) void generate();
         },
       },
       hintInput,
@@ -594,7 +611,10 @@ function fileRow(filePath, { label = null, recent = false, withSeriesIcon = fals
   const updated = mtime != null && updatedSinceRead(filePath, mtime);
   return h(
     'div',
-    { class: `row file${recent ? ' recent' : ''}${pinned ? ' pinned' : ''}${updated ? ' updated' : ''}`, 'data-check-updated': mtime == null ? filePath : null },
+    {
+      class: `row file${recent ? ' recent' : ''}${pinned ? ' pinned' : ''}${updated ? ' updated' : ''}`,
+      'data-check-updated': mtime == null ? filePath : null,
+    },
     h(
       'a',
       { class: 'main', href: fileRoute(filePath) },
@@ -727,7 +747,7 @@ async function openSearch(query, series = null) {
     store.setSeriesIcons(data.seriesIcons);
     if (view !== thisView) return;
     results.replaceChildren(...renderSearchResults(data, query));
-    markUpdatedLater(results);
+    void markUpdatedLater(results);
     restoreScroll();
     toastIfCached(data, '結果');
   } catch (e) {
@@ -824,8 +844,7 @@ $('.sort', filerEl).addEventListener('click', () => {
 
 // 作品（シリーズ）の設定資料から、Gemini であらすじ・登場人物リストを自動生成して表示するシート
 function openSummarySheet(dirPath) {
-  const show = (...content) =>
-    openSheet(h('h2', {}, `「${basename(dirPath)}」の設定・あらすじ`), h('div', { class: 'summary-view' }, content));
+  const show = (...content) => openSheet(h('h2', {}, `「${basename(dirPath)}」の設定・あらすじ`), h('div', { class: 'summary-view' }, content));
   const generateButton = (label) => h('button', { type: 'button', class: 'summary-btn', onclick: generate }, label);
 
   function render(summary) {
@@ -853,7 +872,7 @@ function openSummarySheet(dirPath) {
       render((await generateSummary(dirPath)).summary);
     } catch (e) {
       toast(`生成できませんでした: ${e.message}`);
-      load();
+      void load();
     }
   }
 
@@ -866,7 +885,7 @@ function openSummarySheet(dirPath) {
   }
 
   show('読み込み中…');
-  load();
+  void load();
 }
 
 $('.summary', filerEl).addEventListener('click', () => {
@@ -1151,7 +1170,12 @@ function openNotesSheet(targetLine = null, targetNoteId = null) {
       h('div', { class: 'note-item-header' }, h('span', {}, `第 ${note.line + 1} 行`), h('span', {}, shortDate(note.updatedAt))),
       note.snippet ? h('div', { class: 'note-item-snippet' }, note.snippet) : null,
       note.text ? h('div', { class: 'note-item-text' }, note.text) : null,
-      h('div', { class: 'note-item-actions' }, action('編集', null, () => setForm({ note, line: null })), action('削除', 'delete', remove)),
+      h(
+        'div',
+        { class: 'note-item-actions' },
+        action('編集', null, () => setForm({ note, line: null })),
+        action('削除', 'delete', remove),
+      ),
     );
   }
 
@@ -1199,7 +1223,12 @@ function openDiffSheet(hunk, hunks = [], index = 0) {
       : null;
 
   const pane = (className, label, children) =>
-    h('div', { class: `diff-pane ${className}` }, h('div', { class: 'diff-header' }, label), h('div', { class: 'diff-box' }, h('div', { class: 'diff-text' }, ...children)));
+    h(
+      'div',
+      { class: `diff-pane ${className}` },
+      h('div', { class: 'diff-header' }, label),
+      h('div', { class: 'diff-box' }, h('div', { class: 'diff-text' }, ...children)),
+    );
   openSheet(h('h2', {}, '変更箇所の差分'), nav, h('div', { class: 'diff-view' }, pane('deleted', '変更前', before), pane('added', '変更後', after)));
   sheetEl.classList.add('diff');
 
@@ -1355,9 +1384,7 @@ function segmented(label, key, options) {
     h(
       'div',
       { class: 'segmented' },
-      options.map(([value, text]) =>
-        h('button', { 'aria-pressed': String(settings[key] === value), onclick: () => updateSettings({ [key]: value }) }, text),
-      ),
+      options.map(([value, text]) => h('button', { 'aria-pressed': String(settings[key] === value), onclick: () => updateSettings({ [key]: value }) }, text)),
     ),
   );
 }
@@ -1476,7 +1503,7 @@ document.addEventListener('visibilitychange', () => {
     if (currentFile) reader.flushSave();
     return;
   }
-  onActivate();
+  void onActivate();
 });
 
 // PC ではウィンドウを切り替えても表示状態は変わらないので、フォーカスでも確かめる
@@ -1531,7 +1558,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
+  void navigator.serviceWorker.register('sw.js');
 }
 
 applyTheme();
@@ -1541,5 +1568,5 @@ if (!location.hash) {
   if (last) history.replaceState(null, '', last);
 }
 // 開く話の読書位置を決める前に他の端末の位置を取り込めるよう、画面を開く前に同期を始めておく
-store.syncWithServer(applySyncedData);
+void store.syncWithServer(applySyncedData);
 route();

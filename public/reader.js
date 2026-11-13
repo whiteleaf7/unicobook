@@ -3,7 +3,18 @@
 
 import { parseAozora, decodeText, sourceLines, textHtml, escapeHtml, calculateReadingMetrics } from './aozora.js';
 import { fetchText, fetchStat, imageUrl, dirname, joinPath } from './api.js';
-import { getPosition, setPosition, getBaseline, setBaseline, getBaselineText, setBaselineText, syncSettled, getNotesForPath, saveNote, deleteNote } from './store.js';
+import {
+  getPosition,
+  setPosition,
+  getBaseline,
+  setBaseline,
+  getBaselineText,
+  setBaselineText,
+  syncSettled,
+  getNotesForPath,
+  saveNote,
+  deleteNote,
+} from './store.js';
 import { changedLines, lineHashes, detailedDiff } from './diff.js';
 
 // 段と段の間隔。ページの外は切り取るので値に意味はなく、隣の段がはみ出さない程度あればよい
@@ -227,7 +238,7 @@ export class Reader {
   relayoutWhenFontsLoad() {
     if (document.fonts?.status !== 'loading') return;
     const path = this.path;
-    document.fonts.ready.then(() => {
+    void document.fonts.ready.then(() => {
       if (this.path && this.path === path) this.relayout();
     });
   }
@@ -522,10 +533,7 @@ export class Reader {
     btn.setAttribute('aria-label', note.text ? `付箋: ${note.text}` : '付箋を開く');
     btn.style.left = `${left}px`;
     btn.style.top = `${top}px`;
-    btn.innerHTML =
-      '<span class="note-mark-tab">' +
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.2L6 21z"/></svg>' +
-      '</span>';
+    btn.innerHTML = '<span class="note-mark-tab">' + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4.2L6 21z"/></svg>' + '</span>';
     btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -564,8 +572,7 @@ export class Reader {
   updateChanges() {
     const count = this.changeLines.length;
     this.changesEl.hidden = count === 0;
-    this.changesEl.querySelector('.next-change').textContent =
-      this.changeIndex < 0 ? `変更 ${count}か所 ›` : `変更 ${this.changeIndex + 1}/${count} ›`;
+    this.changesEl.querySelector('.next-change').textContent = this.changeIndex < 0 ? `変更 ${count}か所 ›` : `変更 ${this.changeIndex + 1}/${count} ›`;
   }
 
   // 変更箇所へ移る。最初に押したときは一番目の変更点に飛び、以降は今のページより後ろの次の変更箇所へ移る（最後まで行ったら最初に戻る）
@@ -623,7 +630,10 @@ export class Reader {
     }
     const line = this.changeLines[this.changeIndex];
     if (line === undefined) return 0;
-    return Math.max(0, hunks.findIndex((h) => h.line >= line));
+    return Math.max(
+      0,
+      hunks.findIndex((h) => h.line >= line),
+    );
   }
 
   // 本文から query を探す。大文字と小文字は区別しない
@@ -712,8 +722,7 @@ export class Reader {
     const width = window.innerWidth;
     const target = this.dragTo(dx);
     const forward = velocity * Math.sign(dx);
-    const commit =
-      forward > -FLICK_VELOCITY && (Math.abs(dx) > width * COMMIT_RATIO || forward > FLICK_VELOCITY);
+    const commit = forward > -FLICK_VELOCITY && (Math.abs(dx) > width * COMMIT_RATIO || forward > FLICK_VELOCITY);
 
     // 最後のページから右へ、最初のページから左へ払ったら、ページを画面の外へ送ってから次の話・前の話へ移る
     const direction = dx > 0 ? 'next' : 'prev';
@@ -993,7 +1002,7 @@ export class Reader {
       const changedEl = e.target.closest('.changed') || pointEl?.closest('.changed');
       if (changedEl && this.changeLines.length > 0) {
         const line = Number(changedEl.dataset.l);
-        this.showCurrentDiffDetail(line);
+        void this.showCurrentDiffDetail(line);
         return;
       }
       const ratio = e.clientX / window.innerWidth;
@@ -1011,10 +1020,15 @@ export class Reader {
         this.onTap(first.zone);
       }
       if (img) {
-        pendingTap = { img, zone, time: e.timeStamp, timer: setTimeout(() => {
-          pendingTap = null;
-          this.onTap(zone);
-        }, DOUBLE_TAP_MS) };
+        pendingTap = {
+          img,
+          zone,
+          time: e.timeStamp,
+          timer: setTimeout(() => {
+            pendingTap = null;
+            this.onTap(zone);
+          }, DOUBLE_TAP_MS),
+        };
         return;
       }
       this.onTap(zone);

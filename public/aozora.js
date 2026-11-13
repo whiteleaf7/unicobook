@@ -55,16 +55,14 @@ const TCY_TAG = '<span class="tcy">';
 // 数字は縦中横のタグより先に置き換える（ダッシュのタグの「--n:2」を数字として拾わないため）
 export function textHtml(s) {
   return escapeHtml(s)
-    .replace(/(?<![A-Za-z0-9.,:/_\-])[0-9]{1,2}(?![A-Za-z0-9.,:/_\-])/g, (m) => `${TCY_TAG}${m}</span>`)
+    .replace(/(?<![A-Za-z0-9.,:/_-])[0-9]{1,2}(?![A-Za-z0-9.,:/_-])/g, (m) => `${TCY_TAG}${m}</span>`)
     .replace(/[!?]+/g, (m) => (m.length <= 2 ? `${TCY_TAG}${m}</span>` : `<span class="upright">${m}</span>`))
     .replace(/[―—]{2,}/g, (m) => `<span class="dash" style="--n:${m.length}">${m}</span>`);
 }
 
 // 注記の数字を半角にする。「」で囲まれた本文の引用はそのまま残す
 function toHalfDigits(s) {
-  return s.replace(/「[^」]*」|[０-９]/g, (c) =>
-    c.length === 1 ? String.fromCharCode(c.charCodeAt(0) - 0xfee0) : c,
-  );
+  return s.replace(/「[^」]*」|[０-９]/g, (c) => (c.length === 1 ? String.fromCharCode(c.charCodeAt(0) - 0xfee0) : c));
 }
 
 // 範囲指定・前方参照のどちらでも使う、装飾名から開始タグを作る関数
@@ -138,9 +136,8 @@ class LineBuilder {
     const last = this.segs[this.segs.length - 1];
     if (last && !last.atomic) {
       const m =
-        last.t.match(/[\p{Script=Han}々〆〇ヵヶ]+$/u) ||
-        last.t.match(/[\p{Script=Katakana}ー\u3099\u309A]+$/u) ||
-        last.t.match(/[A-Za-zＡ-Ｚａ-ｚ0-9０-９]+$/);
+        // oxlint-disable-next-line no-misleading-character-class -- 濁点・半濁点の結合文字（U+3099 / U+309A）も 1 文字として拾うため
+        last.t.match(/[\p{Script=Han}々〆〇ヵヶ]+$/u) || last.t.match(/[\p{Script=Katakana}ー\u3099\u309A]+$/u) || last.t.match(/[A-Za-zＡ-Ｚａ-ｚ0-9０-９]+$/);
       if (m) {
         const head = last.t.slice(0, last.t.length - m[0].length);
         this.segs.pop();
@@ -370,11 +367,17 @@ function lineStyle(indent, align) {
 
 // 本文を行に分ける。表示の行番号（data-l）・変更箇所の比較・検索はすべてこの行番号を使う
 export function sourceLines(source) {
-  return stripAozoraHeaderNotes(source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n'));
+  return stripAozoraHeaderNotes(
+    source
+      .replace(/^\uFEFF/, '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n'),
+  );
 }
 
 // 検索用に、ルビの読み・注記・ルビの区切りを除いた 1 行の文字列にする。
 // 表示と同じく、直前にルビを付けられる文字がない《》（「……《ファイアボール》」など）は本文として残す
+// oxlint-disable-next-line no-misleading-character-class -- 濁点・半濁点の結合文字（U+3099 / U+309A）も 1 文字として拾うため
 const RUBY_BASE_CHAR = /[\p{Script=Han}々〆〇ヵヶ\p{Script=Katakana}ー\u3099\u309AA-Za-zＡ-Ｚａ-ｚ0-9０-９]/u;
 
 export function plainLine(line) {

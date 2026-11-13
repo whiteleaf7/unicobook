@@ -327,7 +327,10 @@ button.home .unico-icon {
 .icon.preset text {
   fill: #fff;
   stroke: none;
-  font: 700 15px -apple-system, 'Hiragino Sans', sans-serif;
+  font:
+    700 15px -apple-system,
+    'Hiragino Sans',
+    sans-serif;
   text-anchor: middle;
   dominant-baseline: central;
 }
@@ -1222,7 +1225,7 @@ button.home .unico-icon {
 .diff-text {
   margin: 0;
   width: max-content;
-  font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', serif;
   font-weight: normal;
   font-size: 15px;
   line-height: 1.8;

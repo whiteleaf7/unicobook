@@ -12,7 +12,18 @@ const GENERATED_IMAGE = /\.(png|jpe?g|webp)$/i;
 // timeoutSec は agy に伝える制限時間で、killAfterMs を過ぎても終わらなければ止めて timeoutMessage のエラーにする
 async function runAgy(prompt: string, { timeoutSec, killAfterMs, timeoutMessage }: { timeoutSec: number; killAfterMs: number; timeoutMessage: string }) {
   await mkdir(AGY_WORK_DIR, { recursive: true });
-  const args = ['--print', prompt, '--model', AGY_MODEL, '--output-format', 'json', '--dangerously-skip-permissions', '--sandbox', '--print-timeout', `${timeoutSec}s`];
+  const args = [
+    '--print',
+    prompt,
+    '--model',
+    AGY_MODEL,
+    '--output-format',
+    'json',
+    '--dangerously-skip-permissions',
+    '--sandbox',
+    '--print-timeout',
+    `${timeoutSec}s`,
+  ];
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(AGY, args, { cwd: AGY_WORK_DIR, timeout: killAfterMs, maxBuffer: 10 * 1024 * 1024 }));
@@ -42,7 +53,11 @@ export async function askAgy(prompt: string): Promise<string> {
 export async function generateImageWithAgy(prompt: string): Promise<string> {
   const { response, conversationId } = await runAgy(prompt, { timeoutSec: 300, killAfterMs: 330_000, timeoutMessage: '時間内に作り終わりませんでした' });
   // パスだけと頼んでも前置きを付けてくることがあるので、パスらしい最後の行を使う
-  const pathLine = response.split('\n').map((line) => line.trim()).findLast((line) => path.isAbsolute(line)) ?? '';
+  const pathLine =
+    response
+      .split('\n')
+      .map((line) => line.trim())
+      .findLast((line) => path.isAbsolute(line)) ?? '';
   const image = (await generatedImage(pathLine)) ?? (conversationId && (await latestGeneratedImage(conversationId)));
   if (!image) throw new Error(`画像ができませんでした: ${response.slice(0, 300)}`);
   return image;
