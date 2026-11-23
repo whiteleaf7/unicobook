@@ -9,6 +9,7 @@
 - `scripts/build.ts`: `pnpm build` で、`public/` を esbuild で `dist/` にまとめる（JavaScript は `app.js` から 1 ファイルに束ねて圧縮し、CSS と `sw.js` も圧縮する）。`dist/` は git 管理外。
 - サーバーはふだん `dist/` を配信し、開発モード（`.env` の `UNICOBOOK_DEV=1`、または `pnpm dev`）では `public/` をビルドせずにそのまま配信する。
 - `test/`: `node --test` で動かすテスト。
+- macOS と Linux（Ubuntu）で動く。OS で変わる処理は `server/platform.ts`（OS の判定とパスの既定値）と `server/image-tool.ts`（macOS は sips、Linux は ffmpeg）に寄せ、OS は引数で差し替えられるようにする。常駐化は macOS が `scripts/install-agent.sh`（launchd）、Linux が `scripts/install-agent-linux.sh`（systemd のユーザーサービス）。
 - 実行時の依存パッケージは入れず、Node.js の標準モジュールとブラウザの標準機能だけで書く。`devDependencies` はビルド・整形・リントの道具だけ。
 - コメントや画面の文言は日本語で書く。
 
