@@ -1,14 +1,11 @@
-// 画像を返す。大きい画像は sips で縮小してキャッシュしておく
+// 画像を返す。大きい画像は縮小してキャッシュしておく（縮小に使うコマンドは image-tool.ts を参照）
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { IMAGE_CACHE_DIR } from "./config.ts";
 import { HttpError, MIME, sendFile } from "./http.ts";
-
-const execFileAsync = promisify(execFile);
+import { fallsBackOnError, hasAlpha, resizeImage } from "./image-tool.ts";
 
 // これより大きい画像は縮小して返す（iPhone での表示とオフライン保存を軽くするため）。
 // large は挿絵ビューで拡大して見る用。元画像が巨大でも iPhone が重くならない範囲に抑える
@@ -22,11 +19,10 @@ type ImageLimit = (typeof IMAGE_LIMITS)[keyof typeof IMAGE_LIMITS];
 // 縮小版のキャッシュのキー → 元の画像に透過があるか
 const alphaCache = new Map<string, boolean>();
 
-async function hasAlpha(file: string, key: string): Promise<boolean> {
+async function hasAlphaCached(file: string, key: string): Promise<boolean> {
 	let alpha = alphaCache.get(key);
 	if (alpha === undefined) {
-		const { stdout } = await execFileAsync("sips", ["-g", "hasAlpha", file]);
-		alpha = /hasAlpha:\s*yes/.test(stdout);
+		alpha = await hasAlpha(file);
 		alphaCache.set(key, alpha);
 	}
 	return alpha;
@@ -51,28 +47,40 @@ export async function sendImage(
 	const key = createHash("sha1")
 		.update(`${file}\0${st.size}\0${st.mtimeMs}\0${limit.pixels}`)
 		.digest("hex");
+	let cached: string;
+	try {
+		cached = await resizeCached(file, ext, key, limit);
+	} catch (e) {
+		// Linux で ffmpeg が無いときなどは、縮小を諦めて元の画像を返す
+		if (!fallsBackOnError()) throw e;
+		console.error(`画像を縮小できませんでした: ${file}`, e);
+		cached = file;
+	}
+	await sendFile(req, res, cached);
+}
+
+// 縮小版を作って（キャッシュにあればそれを使って）、そのパスを返す
+async function resizeCached(
+	file: string,
+	ext: string,
+	key: string,
+	limit: ImageLimit,
+): Promise<string> {
 	// PNG のまま縮小すると大きくなるので、透過がなければ JPEG にする
 	const outExt =
-		ext === ".png" && (await hasAlpha(file, key)) ? ".png" : ".jpg";
+		ext === ".png" && (await hasAlphaCached(file, key)) ? ".png" : ".jpg";
 	const cached = path.join(IMAGE_CACHE_DIR, key + outExt);
 	try {
 		await stat(cached);
 	} catch {
 		await mkdir(IMAGE_CACHE_DIR, { recursive: true });
-		const format =
-			outExt === ".png"
-				? ["png"]
-				: ["jpeg", "--setProperty", "formatOptions", String(limit.quality)];
-		await execFileAsync("sips", [
-			"-Z",
-			String(limit.pixels),
-			"-s",
-			"format",
-			...format,
-			file,
-			"--out",
-			cached,
-		]);
+		await resizeImage({
+			src: file,
+			dest: cached,
+			maxPixels: limit.pixels,
+			format: outExt === ".png" ? "png" : "jpeg",
+			quality: limit.quality,
+		});
 	}
-	await sendFile(req, res, cached);
+	return cached;
 }

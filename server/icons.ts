@@ -1,7 +1,6 @@
 // フォルダのアイコン。フォルダに置いた画像（icon.png など）か、アプリで選んだプリセットを使う。
 // 小説フォルダへの書き込みは、Gemini で作ったアイコンを icon.png として置くときと、前の画像を icon~N.png として残すときだけ
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { execFile } from "node:child_process";
 import {
 	mkdir,
 	readdir,
@@ -12,14 +11,12 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { generateImageWithAgy } from "./agy.ts";
 import { PRESETS_FILE, ROOT } from "./config.ts";
 import { relativeToRoot, resolveInRoot } from "./files.ts";
 import { HttpError, mtimeOf, readJsonBody, sendJson } from "./http.ts";
+import { resizeImage } from "./image-tool.ts";
 import { IMAGE_LIMITS, sendImage } from "./images.ts";
-
-const execFileAsync = promisify(execFile);
 
 // フォルダに置くとそのフォルダのアイコンになる画像
 const ICON_FILE = /^icon\.(png|jpe?g|webp|gif|heic)$/i;
@@ -250,16 +247,12 @@ async function generateIcon(
 		// 作っている間に icon.png が差し替えられていたら、そちらを残す
 		if (!(await isPlaceholder(icon))) return;
 		const tmp = path.join(dir, ".icon-generating.png");
-		await execFileAsync("sips", [
-			"-Z",
-			"512",
-			"-s",
-			"format",
-			"png",
-			generated,
-			"--out",
-			tmp,
-		]);
+		await resizeImage({
+			src: generated,
+			dest: tmp,
+			maxPixels: 512,
+			format: "png",
+		});
 		await rename(tmp, icon);
 	} catch (e) {
 		// 作れなかったら、仮のアイコンを外して前の画像を戻す
