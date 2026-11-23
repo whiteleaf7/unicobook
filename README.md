@@ -39,12 +39,12 @@ AI は下の「AI 向けの導入手順」を読んで作業を進めます。�
 
 この節は、導入を頼まれた AI エージェントに向けた手順です。上から順に実行してください。
 
-1. **前提を確認する**: macOS であること、`node --version` が 24 以上であること、`pnpm --version` で pnpm が使えることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。配信するアプリのビルド（`pnpm install` と `pnpm build`）は、手順 6 の `scripts/install-agent.sh` が行います。
+1. **前提を確認する**: macOS であること、`node --version` が 24 以上であること、`pnpm --version` で pnpm が使えることを確かめます。足りなければ、ユーザーにどの方法（nodenv・Homebrew など）で入れるかを確認してから入れてください。配信するアプリのビルド（`pnpm install` と `pnpm build`）は、手順 6 の `scripts/install-agent.sh` が行います。Linux の場合は、macOS の代わりに Linux であること（`uname -s` が `Linux`）を確かめ、あわせて `ffmpeg -version` と `ffprobe -version` で ffmpeg が使えることも確かめます。pnpm が無ければ、`/usr` などではなくホームディレクトリの下に入れてください（「[Linux](#linux)」を参照）。
 2. **リポジトリを置く**: `git clone https://github.com/whiteleaf7/unicobook.git` で取得します。置き場所はユーザーに確認してください。launchd にはこの場所のパスを登録するため、導入後にリポジトリを移動するとサーバーが起動しなくなります。
 3. **小説フォルダを決める**: 配信する小説フォルダのパスをユーザーに尋ねます（例: iCloud Drive の `~/Library/Mobile Documents/com~apple~CloudDocs/novels`）。フォルダの構成は「[小説フォルダの置き方](#小説フォルダの置き方)」を参照してください。
 4. **設定ファイルを作る**: `cp .env.example .env` を実行し、`.env` の `UNICOBOOK_ROOT` を手順 3 のパスに書き換えます。ほかの項目は「[設定](#設定)」の表のとおり既定値のままで構いません。
 5. **テストを実行する**: `pnpm test` がすべて通ることを確かめます。
-6. **常駐サーバーとして登録する**: `scripts/install-agent.sh` を実行します。ログイン時に自動で起動し、落ちたときは再起動する launchd サービス（`local.unicobook`）として登録されます。
+6. **常駐サーバーとして登録する**: `scripts/install-agent.sh` を実行します。ログイン時に自動で起動し、落ちたときは再起動する launchd サービス（`local.unicobook`）として登録されます。Linux の場合は、代わりに `scripts/install-agent-linux.sh` を実行します。systemd のユーザーサービス（`unicobook`）として登録され、手順 7 でうまくいかないときは `journalctl --user -u unicobook` でログを読みます。ログアウトしたあとも動かし続けるかどうかはユーザーに確認し、頼まれたときだけ `loginctl enable-linger` を実行してください。
 7. **動作を確認する**: `curl -sI http://127.0.0.1:8787/` が `200` を返すことを確かめます。うまくいかないときは `~/Library/Logs/unicobook.log` を読んでください。小説フォルダが iCloud Drive にある場合、初回は macOS が node に iCloud Drive へのアクセス許可を求めるダイアログを出します。ユーザーに「許可」を押してもらってください。許可されないと、ログに `EPERM: operation not permitted` が出てフォルダ一覧が読めません。
 8. **iPhone から読めるようにする**: Tailscale が入っていてログイン済みであれば、`tailscale serve --bg 8787` を実行します（`tailscale` コマンドがなければ `/Applications/Tailscale.app/Contents/MacOS/Tailscale` を使います）。tailnet で HTTPS が有効になっていないと、有効にするための URL が表示されるので、ユーザーに開いてもらってください。Tailscale が入っていなければ、この手順は飛ばして、PC のブラウザで `http://localhost:8787/` を開けば読めることを伝えます。
 9. **ユーザーに残りの作業を伝える**: `tailscale serve` が表示した `https://<Mac の名前>.<tailnet>.ts.net/` の URL と、「[iPhone](#iphone)」の手順をユーザーに伝えて、導入は完了です。
@@ -81,6 +81,8 @@ tailscale serve ──▶ server/server.ts（127.0.0.1:8787）──▶ 小説�
   - `summary.ts`: 設定資料から、Gemini であらすじと登場人物の一覧を作ります。
   - `agy.ts`: Gemini を呼ぶ Antigravity の CLI を動かします。
   - `images.ts`: 大きな画像を縮小して返します。
+  - `image-tool.ts`: 画像の透過の判定と縮小を、macOS では sips、Linux では ffmpeg で行います。
+  - `platform.ts`: OS の判定と、OS ごとのパスの既定値をまとめています。
 - `public/`: PWA の本体です。`pnpm build`（`scripts/build.ts`）で `dist/` にまとめて圧縮したものを配信します。開発モードでは、ビルドせずに `public/` をそのまま配信します（「[開発](#開発)」を参照）。
   - `app.js`: ファイラー・メニュー・各シートなど、画面全体を組み立てます。
   - `aozora.js`: 青空文庫記法を解析します。
@@ -136,6 +138,24 @@ tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開する
 - ログは `~/Library/Logs/unicobook.log` に出力されます。登録を解除するときは `scripts/install-agent.sh --uninstall` を実行します。
 - `tailscale` コマンドがない場合は、`/Applications/Tailscale.app/Contents/MacOS/Tailscale` を使ってください。
 
+### Linux
+
+必要なもの: Linux、Node.js 24 以降、pnpm、ffmpeg（`ffmpeg` と `ffprobe` コマンド）、Tailscale（iPhone から読む場合）
+
+```sh
+cp .env.example .env                # 配信するフォルダ（UNICOBOOK_ROOT）などを書き換える
+scripts/install-agent-linux.sh      # アプリをビルドし、systemd のユーザーサービスに登録する（ログイン時に自動で起動する）
+tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開する
+```
+
+- `scripts/install-agent-linux.sh` は、`scripts/install-agent.sh` と同じく、`pnpm install` と `pnpm build` で配信するアプリを `dist/` に作ってから登録します。配信するフォルダは、`.env` の `UNICOBOOK_ROOT` か、`scripts/install-agent-linux.sh "/path/to/dir"` のように引数で指定します。
+- 登録先は `~/.config/systemd/user/unicobook.service` です。落ちたときは自動で再起動します。
+- ログは journal に出力されます。`journalctl --user -u unicobook` で読めます（`-f` を付けると追いかけて表示します）。登録を解除するときは `scripts/install-agent-linux.sh --uninstall` を実行します。
+- 大きな画像の縮小には、sips の代わりに ffmpeg を使います。ffmpeg が無いときや縮小に失敗したときは、縮小せずに元の画像を返します。
+- 縮小した画像やユーザーデータは、既定では XDG の場所（`~/.cache/unicobook` と `~/.local/share/unicobook`。`XDG_CACHE_HOME` と `XDG_DATA_HOME` が設定されていればその下）に置きます。
+- pnpm が無ければ、`corepack enable --install-directory ~/.local/bin pnpm` か、公式のインストーラー（`curl -fsSL https://get.pnpm.io/install.sh | sh -`）で、ホームディレクトリの下に入れてください。
+- systemd のユーザーサービスは、既定ではログインしている間だけ動きます。ログアウトしたあとや、ログインする前から動かしておきたい場合は、`loginctl enable-linger` を実行してください（任意です）。
+
 ### 設定
 
 設定は、リポジトリ直下の `.env`（git 管理外）に書きます。環境変数で渡した値があれば、そちらが優先されます。パスを `~` で始めると、ホームディレクトリとして扱います。
@@ -152,6 +172,8 @@ tailscale serve --bg 8787           # Tailscale 内に HTTPS で公開する
 | `UNICOBOOK_AGY_BRAIN_DIR` | `~/.gemini/antigravity-cli/brain`         | Antigravity の CLI が会話ごとのファイルを置く場所                                      |
 | `UNICOBOOK_DEV`           | なし                                      | `1` にすると開発モードになり、`dist/` ではなく `public/` をそのまま配信します          |
 
+Linux では、`UNICOBOOK_DATA_DIR` の既定値は `$XDG_DATA_HOME/unicobook`（未設定なら `~/.local/share/unicobook`）、`UNICOBOOK_CACHE_DIR` の既定値は `$XDG_CACHE_HOME/unicobook`（未設定なら `~/.cache/unicobook`）になります。
+
 Gemini を使う機能（アイコン作りとあらすじ）を使うには、Mac で `agy` にログインしておく必要があります。使わない場合は設定しなくて構いません。なお、アイコンは 1 枚あたり 2〜3 分かかります。
 
 ### サーバーの再起動
@@ -159,14 +181,16 @@ Gemini を使う機能（アイコン作りとあらすじ）を使うには、M
 `server/` や `.env` を変更したときや、nodenv で node を入れ替えたときは、常駐しているサーバーを再起動してください。
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/local.unicobook
+launchctl kickstart -k gui/$(id -u)/local.unicobook   # macOS
+systemctl --user restart unicobook                    # Linux
 ```
 
 `git pull` で新しい版に更新したときは、アプリをビルドし直してから再起動してください。
 
 ```sh
 pnpm install && pnpm build
-launchctl kickstart -k gui/$(id -u)/local.unicobook
+launchctl kickstart -k gui/$(id -u)/local.unicobook   # macOS
+systemctl --user restart unicobook                    # Linux
 ```
 
 - サーバーは、起動したときの node で動き続けます。再起動しないまま古いバージョンの node を削除すると、iCloud Drive を読めなくなります（`EPERM: operation not permitted, scandir ...`）。
