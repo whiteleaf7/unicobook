@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { defaultDirs, OS } from "./platform.ts";
 
 const env = (name: string) => process.env[name]?.trim() || undefined;
 // ~ で始まるパスは、ホームディレクトリからのパスとして扱う
@@ -34,17 +35,16 @@ if (!existsSync(path.join(PUBLIC_DIR, "index.html"))) {
 	);
 	process.exit(1);
 }
+// 作業ファイルとユーザーデータの置き場所の既定値は OS で変わる（macOS は ~/Library の下、Linux は XDG の場所）
+const DEFAULT_DIRS = defaultDirs(OS);
 // 縮小した画像や、Gemini でアイコンを作るときの作業ファイルを置く場所
 export const IMAGE_CACHE_DIR = envPath(
 	"UNICOBOOK_CACHE_DIR",
-	"~/Library/Caches/unicobook",
+	DEFAULT_DIRS.cacheDir,
 );
 
 // サーバーが持つユーザーデータの置き場所。小説フォルダには書き込まないよう、ここに保存する
-const DATA_DIR = envPath(
-	"UNICOBOOK_DATA_DIR",
-	"~/Library/Application Support/unicobook",
-);
+const DATA_DIR = envPath("UNICOBOOK_DATA_DIR", DEFAULT_DIRS.dataDir);
 // アプリで選んだフォルダのアイコン（プリセットと、画像より優先するか）
 export const PRESETS_FILE = path.join(DATA_DIR, "icons.json");
 // 設定・読書位置・お気に入りなど、ブラウザ間で共有するユーザーデータ
